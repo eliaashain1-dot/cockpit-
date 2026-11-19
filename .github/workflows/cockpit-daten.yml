@@ -1,0 +1,265 @@
+# Börsen-Cockpit – Daten für Wirtschaftskalender, Konjunktur-Chart, Stimmung und Scanner (Fassung 3)
+# Holt einmal pro Stunde den Wirtschaftskalender (Forex Factory) und den Fear-&-Greed-Index von CNN, alle drei Stunden
+# die Konjunkturreihen der US-Notenbank St. Louis (FRED), und legt alles im Zweig „daten“ dieses Repositorys ab.
+# Der Scanner bewertet während des US-Handels etwa alle drei Stunden und nach Börsenschluss alle US-Aktien ab
+# 2 Mrd. $ Börsenwert (Technik, relative Stärke, Branche, Makro). Sein Rechenwerk lädt er aus der index.html der App
+# in diesem Repository: Verbesserungen kommen mit jeder neuen App-Datei, diese Datei bleibt gleich.
+# Die App liest alle Daten von dort.
+# Antwortet eine Quelle nicht, versucht die Action kurz einen Umweg und behält sonst den letzten Stand.
+# Einrichten: Diese Datei als .github/workflows/cockpit-daten.yml ins Repository legen. Sonst ist nichts zu tun.
+name: Cockpit-Daten
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: cockpit-daten
+  cancel-in-progress: true
+jobs:
+  daten:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Kalender, Konjunkturreihen und Stimmung holen
+        timeout-minutes: 8
+        run: |
+          mkdir -p out
+          node - <<'JS'
+          const fs = require('fs');
+          const REPO = process.env.GITHUB_REPOSITORY;
+          const NOW = Date.now();
+          const DEADLINE = NOW + (+process.env.COCKPIT_BUDGET || 5 * 60e3);
+          const WAIT = +process.env.COCKPIT_TIMEOUT || 12000;
+          const HEAD = { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36',
+            'Accept': 'text/csv,application/json,text/plain,*/*', 'Accept-Language': 'en-US,en;q=0.9' };
+          const FRED = ['CPIAUCSL', 'CPILFESL', 'T10YIE', 'FEDFUNDS', 'UNRATE', 'PAYEMS', 'ICSA', 'DGS10', 'DGS2', 'T10Y2Y',
+            'M2SL', 'WALCL', 'BAMLH0A0HYM2', 'ECBDFR', 'DTWEXBGS', 'VIXCLS'];
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+          // Ein Abruf mit fester Zeitgrenze. Fehlerart: 'weg' (Zeitüberschreitung, Netz, Sperre) oder 'quelle' (etwa 404)
+          async function get(url, label) {
+            const ms = Math.min(WAIT, DEADLINE - Date.now());
+            if (ms < 1500) { const e = new Error('Zeit für diesen Lauf abgelaufen'); e.kind = 'zeit'; throw e; }
+            const t0 = Date.now();
+            try {
+              const r = await fetch(url, { headers: HEAD, signal: AbortSignal.timeout(ms) });
+              const body = await r.text();
+              if (!r.ok) { const e = new Error('HTTP ' + r.status); e.kind = r.status === 404 || r.status === 400 ? 'quelle' : 'weg'; throw e; }
+              log('ok  ', label, Math.round(body.length / 1024) + ' KB', (Date.now() - t0) + ' ms');
+              return body;
+            } catch (e) {
+              const err = e.kind ? e : new Error(e.name === 'TimeoutError' || e.name === 'AbortError' ? 'keine Antwort nach ' + Math.round(ms / 1000) + ' s' : ((e.cause && e.cause.code) || e.message));
+              if (!err.kind) err.kind = 'weg';
+              log('FEHLER', label, err.message, (Date.now() - t0) + ' ms');
+              throw err;
+            }
+          }
+          // Wege zu einer Quelle: direkt, sonst über öffentliche Umweg-Dienste. Ein Weg, der klappt, bleibt für die übrigen Abrufe.
+          const WEGE = [
+            ['direkt', (u) => u],
+            ['codetabs', (u) => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u)],
+            ['allorigins', (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)],
+            ['jina', (u) => 'https://r.jina.ai/' + u]
+          ];
+          function quelle(name) { return { name, weg: 0, tot: false }; }
+          async function hole(q, url, check, label) {
+            if (q.tot) throw new Error(q.name + ' nicht erreichbar');
+            let last = null;
+            for (let i = q.weg; i < WEGE.length; i++) {
+              try {
+                const v = check(await get(WEGE[i][1](url), label + ' · ' + WEGE[i][0]));
+                q.weg = i;
+                v.weg = WEGE[i][0];
+                return v;
+              } catch (e) {
+                last = e;
+                if (e.kind === 'zeit') break;
+                if (e.kind === 'quelle' && i === 0) throw e;
+              }
+            }
+            q.tot = true;
+            throw last || new Error('nicht erreichbar');
+          }
+          async function previous(name) {
+            try { return JSON.parse(await get('https://raw.githubusercontent.com/' + REPO + '/daten/' + name + '.json?v=' + NOW, 'bisher ' + name)); } catch (e) { return null; }
+          }
+          // CSV von FRED (auch in der Hülle eines Umweg-Dienstes): Zeilen „JJJJ-MM-TT,Wert“
+          function csv(text) {
+            const out = [];
+            for (const line of String(text).split(/\r?\n/)) {
+              const m = /^(\d{4}-\d{2}-\d{2}),\s*(-?\d+(?:\.\d+)?)\s*$/.exec(line.trim());
+              if (m) out.push([m[1], parseFloat(m[2])]);
+            }
+            if (out.length < 3) throw Object.assign(new Error('keine Werte in der Antwort'), { kind: 'weg' });
+            return out;
+          }
+          function kalender(text) {
+            const s = String(text), a = s.indexOf('['), b = s.lastIndexOf(']');
+            let list = null;
+            try { list = JSON.parse(a >= 0 && b > a ? s.slice(a, b + 1) : s); } catch (e) { list = null; }
+            if (!Array.isArray(list) || !list.length || !list[0] || !list[0].title) throw Object.assign(new Error('kein Kalender in der Antwort'), { kind: 'weg' });
+            return list;
+          }
+          // Tageswerte älter als drei Jahre: nur der letzte Wert jeder Woche (hält die Datei klein)
+          function thin(rows) {
+            const cut = new Date(NOW - 3 * 365.25 * 864e5).toISOString().slice(0, 10);
+            const out = [];
+            let week = null;
+            for (const r of rows) {
+              if (r[0] >= cut) { out.push(r); continue; }
+              const w = Math.floor((Date.parse(r[0] + 'T12:00:00Z') / 864e5 + 3) / 7);
+              if (w === week) out[out.length - 1] = r; else { out.push(r); week = w; }
+            }
+            return out;
+          }
+          (async () => {
+            const stand = { t: NOW, ff: '', fred: {}, wege: {} };
+            const save = () => fs.writeFileSync('out/stand.json', JSON.stringify(stand, null, 1));
+            save();
+            // 1. Wirtschaftskalender
+            const kal = { v: 1, t: NOW, src: 'Forex Factory', ff: [] };
+            const ffq = quelle('Forex Factory');
+            try {
+              const list = await hole(ffq, 'https://nfs.faireconomy.media/ff_calendar_thisweek.json', kalender, 'Kalender');
+              kal.ff = list.map((x) => ({ title: x.title, country: x.country, date: x.date, impact: x.impact, forecast: x.forecast, previous: x.previous }));
+              stand.ff = 'ok · ' + list.length + ' Termine';
+              stand.wege.ff = list.weg;
+            } catch (e) {
+              const old = await previous('kalender');
+              if (old && Array.isArray(old.ff) && old.ff.length) { kal.ff = old.ff; kal.t = old.t; }
+              stand.ff = 'Fehler: ' + e.message;
+            }
+            fs.writeFileSync('out/kalender.json', JSON.stringify(kal));
+            save();
+            // 2. Konjunkturreihen (alle drei Stunden neu, dazwischen bleibt der letzte Stand)
+            const old = await previous('makro');
+            const keep = old && old.fred && NOW - old.t < 3 * 3600e3 - 10 * 60e3 && FRED.every((id) => Array.isArray(old.fred[id]) && old.fred[id].length > 2);
+            const makro = { v: 1, t: 0, src: 'FRED', fred: {}, at: {} };
+            const from = new Date(NOW - 11 * 365.25 * 864e5).toISOString().slice(0, 10);
+            const fq = quelle('FRED');
+            for (const id of FRED) {
+              if (keep) { makro.fred[id] = old.fred[id]; makro.at[id] = (old.at && old.at[id]) || old.t; stand.fred[id] = 'unverändert'; continue; }
+              try {
+                const rows = await hole(fq, 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=' + id + '&cosd=' + from, csv, 'FRED ' + id);
+                makro.fred[id] = thin(rows);
+                makro.at[id] = NOW;
+                stand.fred[id] = 'ok · ' + rows.length;
+                stand.wege.fred = rows.weg;
+              } catch (e) {
+                if (old && old.fred && old.fred[id]) { makro.fred[id] = old.fred[id]; makro.at[id] = (old.at && old.at[id]) || old.t; stand.fred[id] = 'behalten (' + e.message + ')'; }
+                else stand.fred[id] = 'Fehler: ' + e.message;
+              }
+              await wait(300);
+            }
+            makro.t = Math.max(0, ...Object.values(makro.at));
+            if (makro.t > 0) fs.writeFileSync('out/makro.json', JSON.stringify(makro));
+            save();
+            // 3. Stimmung: Fear-&-Greed-Index von CNN mit seinen sieben Bausteinen (ohne deren Verläufe, das hält die Datei klein)
+            const cq = quelle('CNN');
+            try {
+              const d = await hole(cq, 'https://production.dataviz.cnn.io/index/fearandgreed/graphdata', (text) => {
+                const s = String(text), a = s.indexOf('{'), b = s.lastIndexOf('}');
+                const j = JSON.parse(a >= 0 && b > a ? s.slice(a, b + 1) : s);
+                if (!j || !j.fear_and_greed || !(+j.fear_and_greed.score >= 0)) throw Object.assign(new Error('kein Index in der Antwort'), { kind: 'weg' });
+                return j;
+              }, 'Fear & Greed');
+              const cnn = { fear_and_greed: d.fear_and_greed };
+              const h = d.fear_and_greed_historical && d.fear_and_greed_historical.data;
+              if (Array.isArray(h)) cnn.fear_and_greed_historical = { data: h.slice(-400).map((x) => ({ x: x.x, y: Math.round(x.y * 10) / 10 })) };
+              for (const k of ['market_momentum_sp500', 'stock_price_strength', 'stock_price_breadth', 'put_call_options', 'market_volatility_vix', 'safe_haven_demand', 'junk_bond_demand']) {
+                if (d[k]) cnn[k] = { score: d[k].score, rating: d[k].rating, timestamp: d[k].timestamp };
+              }
+              fs.writeFileSync('out/stimmung.json', JSON.stringify({ v: 1, t: NOW, src: 'CNN', cnn }));
+              stand.cnn = 'ok · ' + Math.round(+d.fear_and_greed.score) + ' (' + d.fear_and_greed.rating + ')';
+              stand.wege.cnn = d.weg;
+            } catch (e) {
+              const alt = await previous('stimmung');
+              if (alt && alt.cnn) fs.writeFileSync('out/stimmung.json', JSON.stringify(alt));
+              stand.cnn = 'Fehler: ' + e.message;
+            }
+            stand.dauer = Math.round((Date.now() - NOW) / 1000) + ' s';
+            save();
+            stand.wf = 3;
+            save();
+            fs.writeFileSync('out/README.md', '# Daten fürs Börsen-Cockpit\n\nWird stündlich von der GitHub-Action „Cockpit-Daten“ erzeugt. Bitte nicht von Hand ändern.\n');
+            log('Fertig:', JSON.stringify({ ff: stand.ff, cnn: stand.cnn, wege: stand.wege, reihen: Object.keys(makro.fred).length, dauer: stand.dauer }));
+          })().catch((e) => { console.error(e); process.exit(1); });
+          JS
+      - name: Scanner (Technik aller großen US-Aktien)
+        if: always()
+        timeout-minutes: 16
+        env:
+          COCKPIT_EVENT: ${{ github.event_name }}
+        run: |
+          mkdir -p out
+          node - <<'JS'
+          const fs = require('fs'), vm = require('vm');
+          const REPO = process.env.GITHUB_REPOSITORY, NOW = Date.now(), EVENT = process.env.COCKPIT_EVENT || '';
+          const DEADLINE = NOW + (+process.env.COCKPIT_SCAN_BUDGET || 11 * 60e3);
+          const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+          const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+          const stand = read('out/stand.json') || { t: NOW, wege: {} };
+          const save = () => fs.writeFileSync('out/stand.json', JSON.stringify(stand, null, 1));
+          stand.wf = 3;
+          /* Abruf mit Zeitgrenze, Ergebnis { ok, status, text } */
+          async function get(url, o) {
+            o = o || {};
+            const ms = Math.max(1500, Math.min(o.ms || 12000, DEADLINE + 90e3 - Date.now()));
+            try {
+              const r = await fetch(url, { headers: o.headers || {}, signal: AbortSignal.timeout(ms) });
+              return { ok: r.ok, status: r.status, text: await r.text() };
+            } catch (e) { return { ok: false, status: 0, text: '' }; }
+          }
+          /* Ein Modul aus der zusammengesetzten App-Datei */
+          function modul(src, name) {
+            const a = src.indexOf('/* ===== ' + name + ' ===== */');
+            if (a < 0) return null;
+            const b = src.indexOf('/* ===== ', a + 12);
+            return src.slice(a, b < 0 ? undefined : b);
+          }
+          let prev = null;
+          const keep = (why) => {
+            if (prev) fs.writeFileSync('out/scanner.json', JSON.stringify(prev));
+            stand.scan = why; stand.scanT = prev ? prev.t : 0; save();
+            log('Scanner: ' + why);
+          };
+          (async () => {
+            const old = await get('https://raw.githubusercontent.com/' + REPO + '/daten/scanner.json?v=' + NOW, { ms: 25000 });
+            try { prev = old.ok ? JSON.parse(old.text) : null; } catch (e) { prev = null; }
+            const [owner, name] = REPO.split('/');
+            const pages = 'https://' + owner + '.github.io/' + (name.toLowerCase() === owner.toLowerCase() + '.github.io' ? '' : name + '/');
+            let src = '';
+            for (const u of ['https://raw.githubusercontent.com/' + REPO + '/HEAD/index.html', 'https://raw.githubusercontent.com/' + REPO + '/HEAD/docs/index.html', pages + 'index.html']) {
+              const r = await get(u + '?v=' + NOW, { ms: 25000 });
+              if (r.ok && r.text.indexOf('/* ===== 07-scan.js ===== */') > 0) { src = r.text; log('Rechenwerk aus ' + u); break; }
+            }
+            if (!src) return keep('Fehler: In der index.html fehlt der Scanner – bitte die neue App-Datei hochladen');
+            for (const f of ['07-analyse.js', '07-scan.js']) {
+              const code = modul(src, f);
+              if (!code) return keep('Fehler: ' + f + ' fehlt in der App-Datei');
+              vm.runInThisContext(code, { filename: f });
+            }
+            const S = globalThis.BC && globalThis.BC.scan;
+            if (!S || !S.run) return keep('Fehler: Scanner in der App-Datei unvollständig');
+            const res = await S.run({ get, log, now: NOW, deadline: DEADLINE, prev, event: EVENT, makro: read('out/makro.json'), stimmung: read('out/stimmung.json') });
+            if (res.data) fs.writeFileSync('out/scanner.json', JSON.stringify(res.data));
+            stand.scan = res.status; stand.scanT = res.data ? res.data.t : 0; save();
+            log('Scanner: ' + res.status);
+          })().catch((e) => { console.error(e); keep('Fehler: ' + (e && e.message || e)); });
+          JS
+      - name: Im Zweig „daten“ ablegen
+        if: always()
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          cd out
+          if [ ! -f stand.json ]; then echo 'Keine Daten geholt'; exit 1; fi
+          git init -q -b daten
+          git config user.name 'Cockpit-Daten'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -q -m "Daten $(date -u '+%Y-%m-%d %H:%M') UTC"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:daten
+          echo 'Abgelegt im Zweig daten.'
