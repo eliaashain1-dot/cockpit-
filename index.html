@@ -1434,6 +1434,9 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
 .sc-age{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin:2px 0 6px;font-size:.86rem}
 .sc-age b{font-weight:700} .sc-age b.is-up{color:var(--up)} .sc-age b.is-flat{color:var(--dim)} .sc-age span{color:var(--muted)}
 
+.ta-tfc{margin:4px 0 8px;font-size:.84rem;color:var(--muted)} .ta-tfc.is-warn{color:var(--warn, #b7791f)}
+.ta-warn.is-guard{opacity:.95}
+
 </style>
 </head>
 <body>
@@ -6175,6 +6178,14 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var adj = { ausbruch: 8, pend: 2, boden: bse.kind === 'w' || bse.kind === 'hl' ? 8 : 4, test: -15 }[st] || 0;
     var score = clamp(Math.round(10 + wOn / wAll * 55 + prox + room + crvB + steep + adj), 1, 100);
     if (st === 'abwaerts') score = Math.min(score, 30);
+    /* Leitplanken der Umkehr-Chance: ein tiefer Kurs oder RSI allein ist kein Boden – es braucht einen Strukturbeleg (Signal, höheres Tief,
+       Linienbruch, Doppelboden, Divergenz, gehaltenes Tief). Ein starker Abwärtstrend (ADX ab 25, Verkäufer vorn, Kurs unter beiden Linien)
+       bremst ohne Strukturwechsel. Chance : Risiko unter 1 : 1 deckelt. */
+    var guard = [], structOn = sig.some(function (x) { return x.on && /^(trig|hl|line|dbl|div|hold)$/.test(x.k); });
+    var m50o = (a.ma.list.filter(function (x) { return x.n === 50; })[0] || {}).v, belowMA = (m50o == null || p < m50o) && (!L || p < L.v);
+    if (!structOn) { score = Math.min(score, 30); guard.push('nur Überverkauftheit oder Abstand – kein Strukturbeleg'); }
+    if (a.mom.adx != null && a.mom.adx >= 25 && a.mom.mdi > a.mom.pdi && belowMA && !trig && a.hl !== true && !div) { score = Math.min(score, 35); guard.push('starker Abwärtstrend (ADX ' + num(a.mom.adx, 0) + ') ohne Strukturwechsel'); }
+    if (plan && plan.crv != null && plan.crv < 1) { score = Math.min(score, 45); guard.push('Chance : Risiko nur ' + num(plan.crv, 1) + ' : 1'); }
     /* Gegentrend: ausgelöst, aber das große Bild ist noch abwärts (Trendphase bärisch, und darüber liegt noch die Strukturmarke
        oder der Kurs ist kaum vom Tief weg). Dann ist es ein erster Umkehrversuch – nicht „die Umkehr“: Wertung gedeckelt, Ton neutral. */
     var stage = stage2[0] || null, small = (p - lo) / atr < 2.5;
@@ -6194,7 +6205,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     if (L && L.v > p) tws.push({ v: L.v, src: a.ma.nameL });
     tws = tws.filter(function (x) { return x.v > lastS * 1.01; });
     if (tws.length) steps.push({ k: 'trend', n: 'Trendwende', v: tws[0].v, src: tws[0].src, done: false });
-    return { score: score, label: label, tone: tone, st: st, gegen: gegen, steps: steps, live: live, base: bse.kind || !bse.conf ? bse : null, post: post, sig: sig,
+    return { score: score, label: label, tone: tone, st: st, gegen: gegen, steps: steps, live: live, base: bse.kind || !bse.conf ? bse : null, post: post, sig: sig, guard: guard,
       n: sig.filter(function (x) { return x.on; }).length, of: sig.length,
       mark: mark ? { v: mark.v, src: mark.src, d: (mark.v / p - 1) * 100 } : null, next: stage2[0] || null,
       conf: conf ? { v: conf.v, src: conf.src, d: (conf.v / p - 1) * 100 } : null,
@@ -6591,6 +6602,8 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
         : (supA.filter(function (v) { return v <= entry - 1.5 * atr; })[0] || entry - 2.5 * atr);
       var risk = Math.abs(entry - stop), crv = risk > 0 ? Math.abs(t1 - entry) / risk : null;
       if (crv != null) q += crv >= 3 ? 15 : (crv >= 2 ? 10 : (crv < 1.2 ? -15 : 0));
+      /* Leitplanke: unter 1 : 1 lohnt sich der Trade nicht – Güte gedeckelt, egal wie gut das Muster aussieht */
+      if (crv != null && crv < 1) q = Math.min(q, 40);
       var ko = longSide ? stop - 0.5 * atr : stop + 0.5 * atr, lev = ko > 0 && Math.abs(p - ko) > 0 ? p / Math.abs(p - ko) : null;
       list.push({ k: k, n: T.SHORT_K[k], q: clamp(Math.round(q), 1, 100), entry: entry, stop: stop, t1: t1, crv: crv, side: longSide ? 'long' : 'short',
         risk: risk / entry * 100, ko: ko, lev: lev, why: why, pend: live && at === n - 1 });
@@ -6771,7 +6784,9 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     /* 4. Nicht heiß gelaufen */
     var ext = m20 != null && atr > 0 ? (p - m20) / atr : 0, d50 = mM != null ? (p / mM - 1) * 100 : 0, lim50 = Math.max(25, 8 * a.volat.atrPct);
     var hot = (m.rsi != null && m.rsi >= 75) || ext >= 3.5 || d50 >= lim50, cool = (m.rsi == null || m.rsi <= 68) && ext <= 2.2 && d50 < lim50 * 0.6;
-    add('heat', 1.5, hot ? -1 : (cool ? 1 : 0), 'Nicht heiß gelaufen', hot ? 'RSI ' + num(m.rsi, 0) + ', ' + num(ext, 1) + ' Tagesspannen über der 20-Tage-Linie: Rücksetzer wahrscheinlich' :
+    /* Fallendes Messer: stark überverkauft im Abwärtstrend ist kein Pluspunkt „nicht heiß gelaufen“ */
+    var knife = a.tone === 'bear' && ((m.rsi != null && m.rsi < 32) || ext <= -2.5);
+    add('heat', 1.5, hot ? -1 : (knife ? 0 : (cool ? 1 : 0)), 'Nicht heiß gelaufen', knife ? 'Stark überverkauft im Abwärtstrend (RSI ' + num(m.rsi, 0) + ', ' + num(-ext, 1) + ' Tagesspannen unter der 20-Tage-Linie): fallendes Messer, kein Pluspunkt' : hot ? 'RSI ' + num(m.rsi, 0) + ', ' + num(ext, 1) + ' Tagesspannen über der 20-Tage-Linie: Rücksetzer wahrscheinlich' :
       (cool ? 'Kurs nicht überdehnt (' + num(ext, 1) + ' Tagesspannen zur 20-Tage-Linie)' : 'Etwas gestreckt (' + num(ext, 1) + ' Tagesspannen über der 20-Tage-Linie)'));
     /* Unterstützungen und Ziele sammeln */
     var below = [], above = [];
@@ -6848,6 +6863,10 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var wSum = 0, sSum = 0;
     items.forEach(function (x) { wSum += x.w; sSum += x.s * x.w; });
     var score = wSum ? sSum / wSum : 0;
+    /* Leitplanken vor dem Urteil: schwaches Chance-Risiko und fallendes Messer deckeln den Einstiegs-Wert */
+    var guard = [];
+    if (plan && plan.crv != null && plan.crv < 1) { score = Math.min(score, -0.1); guard.push('Chance : Risiko nur ' + num(plan.crv, 1) + ' : 1 – Einstiegs-Wert gedeckelt'); }
+    if (knife) { score = Math.min(score, -0.2); guard.push('Fallendes Messer: überverkauft im Abwärtstrend ohne Strukturwechsel'); }
     /* Urteil */
     var v0 = 'y', head = '', why = '', trigger = null, trigger2 = null, key = 'neutral';
     var trendItem = items.filter(function (x) { return x.k === 'trend'; })[0];
@@ -6868,7 +6887,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       } else if (up1) trigger = { v: up1.v, t: 'Interessant erst über ' + dat(up1.src) };
     } else if (a.phase === 'base') {
       var tr = plan && plan.trigger ? plan.trigger : (above[0] || null);
-      if (a.baseN >= 5 && (a.pat.breakout || (a.lines.res && a.lines.res.broken >= 0)) && score >= 0.2) { v0 = 'g'; key = 'early'; head = 'Frühes Kaufsignal: Bodenbildung mit Ausbruch'; why = a.baseN + ' von 8 Bodensignalen sind erfüllt.'; }
+      if (a.baseN >= 5 && (a.pat.breakout || (a.lines.res && a.lines.res.broken >= 0)) && score >= 0.2 && (!plan || plan.crv == null || plan.crv >= 1)) { v0 = 'g'; key = 'early'; head = 'Frühes Kaufsignal: Bodenbildung mit Ausbruch'; why = a.baseN + ' von 8 Bodensignalen sind erfüllt.'; }
       else { v0 = 'y'; key = 'base'; head = 'Abwarten: Boden noch nicht bestätigt'; why = a.baseN + ' von 8 Bodensignalen erfüllt. Bestätigt wird der Boden erst durch einen Ausbruch nach oben.'; }
       if (tr) trigger = { v: tr.v, t: 'Kaufsignal bei Schlusskurs über ' + dat(tr.src) };
     } else if (hot && a.tone === 'bull') {
@@ -6889,7 +6908,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       v0 = 'y'; key = a.phase === 'top' ? 'tired' : 'neutral'; head = a.phase === 'top' ? 'Vorsicht: Topbildung' : 'Neutral: keine klare Richtung'; why = 'Für und Wider halten sich die Waage.';
       if (plan && plan.trigger) trigger = { v: plan.trigger.v, t: 'Kaufsignal bei Schlusskurs über ' + dat(plan.trigger.src) };
     }
-    return { v: v0, key: key, head: head, why: why, items: items, score: score, pct: Math.round(50 + 50 * score), plan: plan, trigger: trigger, trigger2: trigger2, warn: warn, sup: sup };
+    return { v: v0, key: key, head: head, why: why, items: items, score: score, pct: Math.round(50 + 50 * score), plan: plan, trigger: trigger, trigger2: trigger2, warn: warn, sup: sup, guard: guard };
   };
 
   /* ================= Kaufwertung 1 bis 100 ================= */
@@ -7358,8 +7377,10 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       });
     });
     if (!(hi > lo)) { hi = lo * 1.01 + 0.01; lo = lo * 0.99; }
-    var padY = (hi - lo) * 0.07;
+    var padY = (hi - lo) * 0.07, lo0 = lo;
     lo -= padY; hi += padY;
+    /* Kurse sind nie negativ: die Achse endet bei 0 statt bei „−0“ */
+    if (lo0 >= 0 && lo < 0) lo = 0;
     var top = 6, bot = mainH - 4;
     function y(v) { return top + (hi - v) / (hi - lo) * (bot - top); }
     var ref = base != null ? base : closes[0], last = closes[n - 1], dir = last >= ref ? 'up' : 'down';
@@ -7388,7 +7409,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       var yy = y(k);
       if (yy < top + 6 || yy > bot - 2) continue;
       s += '<line class="ch-grid" x1="' + gL + '" x2="' + xEnd.toFixed(1) + '" y1="' + yy.toFixed(1) + '" y2="' + yy.toFixed(1) + '"/>';
-      if (!tagY.some(function (ty) { return Math.abs(ty - yy) < 11; })) s += '<text class="ch-ylab" x="' + (W - 2) + '" y="' + (yy + 4).toFixed(1) + '">' + e(U.num(k * cur.k, dig)) + '</text>';
+      if (!tagY.some(function (ty) { return Math.abs(ty - yy) < 11; })) s += '<text class="ch-ylab" x="' + (W - 2) + '" y="' + (yy + 4).toFixed(1) + '">' + e(U.num(Math.abs(k) < stepY * 1e-6 ? 0 : k * cur.k, dig)) + '</text>';
     }
     if (base != null && range === '1d') {
       s += '<line class="ch-base" x1="' + gL + '" x2="' + xEnd.toFixed(1) + '" y1="' + y(base).toFixed(1) + '" y2="' + y(base).toFixed(1) + '"/>';
@@ -9722,7 +9743,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var lres = a.levels.res.map(function (l) { return { lo: l.lo || l.v, hi: l.hi || l.v, mid: l.v, src: ['Zone ' + l.n + '×'] }; });
     var lsup = a.levels.sup.map(function (l) { return { lo: l.lo || l.v, hi: l.hi || l.v, mid: l.v, src: ['Zone ' + l.n + '×'] }; });
     if (!res.length) res = lres; if (!sup.length) sup = lsup;
-    var pats = (ctx.pats || []).filter(function (o) { return o.st === 'form' && o.trig && o.q >= 50; });
+    var pats = (ctx.pats || []).filter(function (o) { return o.st === 'form' && o.trig && o.q >= 50 && !o.against; });
     var bullP = pats.filter(function (o) { return o.dir > 0 && o.trig.v > p; })[0], bearP = pats.filter(function (o) { return o.dir < 0 && o.trig.v < p; })[0];
     /* Trigger: nächste Zone, Strukturbruch in Trendrichtung, Charakterwechsel gegen den Trend (beide Seiten gleich), Muster –
        und die nächste einfache Marke, falls die Konfluenz-Zonen weit weg liegen */
@@ -9797,23 +9818,49 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     }
     var sum = wb + wn + wr;
     var stepBars = function (dist) { return clamp(Math.round(Math.abs(dist) / (0.55 * atr)), 3, 30); };
-    function path(trig, tl) {
-      var pts = [{ i: n - 1, v: pL }], at = n - 1, last = pL;
-      [{ v: trig }].concat(tl).forEach(function (x) { at += stepBars(x.v - last); pts.push({ i: at, v: x.v }); last = x.v; });
+    /* Marken, an denen ein Pfad anstößt: Zonen (mehrfach getestet), Konfluenz, gleitende Durchschnitte, POC und HVN des Volumenprofils */
+    var vp0 = ctx.vp, marks = [];
+    function addM(v, txt, w) { if (ok(v) && v > 0 && !marks.some(function (m) { return Math.abs(m.v - v) < 0.35 * atr; })) marks.push({ v: v, txt: txt, w: w }); }
+    conf.forEach(function (z) { addM(z.mid, 'Konfluenz (' + (z.src || []).slice(0, 2).join(', ') + ')', 3); });
+    lres.concat(lsup).forEach(function (z) { addM(z.mid, (z.mid > p ? 'Widerstand' : 'Unterstützung') + ' (' + (z.src || [])[0] + ')', 2); });
+    (a.ma && a.ma.list || []).forEach(function (m) { addM(m.v, m.n + 'er-Linie', 1.5); });
+    if (vp0) { addM(vp0.poc, 'POC (meistgehandelter Kurs)', 2); (vp0.hvn || []).slice(0, 2).forEach(function (h) { addM(ok(h.v) ? h.v : (h.lo + h.hi) / 2, 'Volumen-Knoten (HVN)', 1); }); }
+    /* Pfad wie im Markt: an der ersten Marke vor dem Trigger anstoßen und zurückfallen, Ausbruch mit Rücktest der Marke, an einer Hürde
+       vor dem Ziel abflachen – erst danach weiter. gates: was zuerst getestet oder überwunden werden muss */
+    function path(trig, tl, dir) {
+      var pts = [{ i: n - 1, v: pL }], at = n - 1, last = pL, gates = [], t1 = tl[0] ? tl[0].v : trig + dir * 2.5 * atr;
+      var go = function (v) { if (!(v > 0)) return; at += stepBars(v - last); pts.push({ i: at, v: v }); last = v; };
+      var between = function (a0, b0, gap) { return marks.filter(function (m) { return dir * (m.v - a0) >= gap * atr && dir * (b0 - m.v) >= gap * atr; }).sort(function (x, y) { return dir * (x.v - y.v); }); };
+      var pre = between(pL, trig, 0.6)[0];
+      if (pre) { go(pre.v); go(pre.v - dir * 0.45 * atr); gates.push({ v: pre.v, k: 'test', txt: pre.txt }); }
+      go(trig);
+      if (dir * (t1 - trig) > 1.8 * atr) { go(trig + dir * 0.8 * atr); go(trig + dir * 0.1 * atr); gates.push({ v: trig, k: 'retest', txt: 'Rücktest der Ausbruchsmarke' }); }
+      var hurdle = between(trig + dir * 0.9 * atr, t1, 0.6)[0];
+      if (hurdle) { go(hurdle.v); go(hurdle.v - dir * 0.5 * atr); gates.push({ v: hurdle.v, k: 'over', txt: hurdle.txt }); }
+      tl.forEach(function (x, j) { go(x.v); if (j < tl.length - 1) go(x.v - dir * 0.4 * atr); });
+      pts.gates = gates;
       return pts;
+    }
+    function gateTxt(gs, dir) {
+      if (!gs || !gs.length) return '';
+      return gs.map(function (g) {
+        return g.k === 'test' ? 'zuerst Test von ' + pf(g.v) + ' (' + g.txt + ')' : (g.k === 'retest' ? 'nach dem ' + (dir > 0 ? 'Ausbruch' : 'Bruch') + ' Rücktest an ' + pf(g.v) : 'vor dem Ziel ' + (dir > 0 ? 'Hürde ' : 'Boden ') + pf(g.v) + ' (' + g.txt + ')');
+      }).join(', dann ');
     }
     var bull = { k: 'bull', n: 'Bullisch / Ausbruch', w: Math.round(wb / sum * 100), trig: { v: upTrig, txt: 'Schluss über ' + pf(upTrig) + (bullP && Math.abs(bullP.trig.v / upTrig - 1) < 0.002 ? ' (Muster: ' + bullP.n + ')' : '') },
       conf: 'Folgetag hält über ' + pf(upTrig) + ', am besten mit Volumen über dem Schnitt; ein Rücktest an die Marke darf sie nicht verlieren.',
-      tgts: bullT, inval: { v: upTrig - 0.6 * atr, pre: dnTrig, txt: 'vor dem Ausbruch: Schluss unter ' + pf(dnTrig) + '; danach zurück unter ' + pf(upTrig - 0.6 * atr) + ' (Fehlausbruch)' }, path: path(upTrig, bullT),
+      tgts: bullT, inval: { v: upTrig - 0.6 * atr, pre: dnTrig, txt: 'vor dem Ausbruch: Schluss unter ' + pf(dnTrig) + '; danach zurück unter ' + pf(upTrig - 0.6 * atr) + ' (Fehlausbruch)' }, path: path(upTrig, bullT, 1),
       txt: st.trend > 0 ? 'Im Aufwärtstrend die naheliegende Fortsetzung.' : (st.trend < 0 ? 'Gegen den Abwärtstrend: braucht einen klaren Schluss und Volumen' + (st.choch ? '; erst über ' + pf(st.choch.v) + ' (CHoCH) wäre es ein Trendwechsel.' : '.') : 'Ausbruch aus der Seitwärtsphase nach oben.') };
     var bear = { k: 'bear', n: 'Bärisch / Bruch', w: Math.round(wr / sum * 100), trig: { v: dnTrig, txt: 'Schluss unter ' + pf(dnTrig) + (bearP && Math.abs(bearP.trig.v / dnTrig - 1) < 0.002 ? ' (Muster: ' + bearP.n + ')' : '') },
-      conf: 'Rücktest von unten scheitert an ' + pf(dnTrig) + '; neue tiefere Tiefs.', tgts: bearT, inval: { v: dnTrig + 0.6 * atr, pre: upTrig, txt: 'vor dem Bruch: Schluss über ' + pf(upTrig) + '; danach zurück über ' + pf(dnTrig + 0.6 * atr) }, path: path(dnTrig, bearT),
+      conf: 'Rücktest von unten scheitert an ' + pf(dnTrig) + '; neue tiefere Tiefs.', tgts: bearT, inval: { v: dnTrig + 0.6 * atr, pre: upTrig, txt: 'vor dem Bruch: Schluss über ' + pf(upTrig) + '; danach zurück über ' + pf(dnTrig + 0.6 * atr) }, path: path(dnTrig, bearT, -1),
       txt: st.trend < 0 ? 'Im Abwärtstrend die naheliegende Fortsetzung.' : (st.trend > 0 ? 'Gegen den Aufwärtstrend: zunächst nur ein Rücksetzer' + (st.choch ? '; erst unter ' + pf(st.choch.v) + ' (CHoCH) wäre es ein Trendwechsel.' : '.') : 'Bruch der Seitwärtsphase nach unten.') };
     var mid = (rLo + rHi) / 2;
     var range = { k: 'range', n: 'Neutral / Range', w: Math.max(0, 100 - bull.w - bear.w), trig: { v: mid, txt: 'Schlusskurse bleiben zwischen ' + pf(rLo) + ' und ' + pf(rHi) },
       conf: 'Abpraller an beiden Rändern, Volumen nimmt ab.', tgts: [{ v: rHi, txt: 'oberer Rand' }, { v: rLo, txt: 'unterer Rand' }], inval: { v: null, txt: 'Schluss außerhalb der Spanne' },
       path: [{ i: n - 1, v: pL }, { i: n - 1 + stepBars(rHi - pL), v: rHi }, { i: n - 1 + stepBars(rHi - pL) + stepBars(rHi - rLo), v: rLo }, { i: n - 1 + stepBars(rHi - pL) + 2 * stepBars(rHi - rLo), v: mid }],
       txt: 'Seitwärts zwischen Unterstützung und Widerstand; handelbar nur an den Rändern.', lo: rLo, hi: rHi };
+    bull.gates = bull.path.gates || []; bear.gates = bear.path.gates || [];
+    bull.gate = gateTxt(bull.gates, 1); bear.gate = gateTxt(bear.gates, -1);
     var list = [bull, range, bear], main = list.slice().sort(function (x, y) { return y.w - x.w; })[0];
     /* Status der Trigger wie trader-entry: wartet (auch Aufbau in der laufenden Kerze), ausgelöst per Schluss, abgelaufen */
     bull.status = X.trigStatus(a, upTrig, 1); bear.status = X.trigStatus(a, dnTrig, -1);
@@ -10083,6 +10130,24 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
   /* ================= Alles zusammen (mit Zwischenspeicher je Analyse) ================= */
   /* opt: { lvl ('prim' | 'sub'), fmt (Preis → Text in der Einheit der Ansicht), unit (Schlüssel der Einheit, z. B. '1|$' oder '41,2|Pkt.') }
      Gemerkt je Ebene und Einheit: Texte mit Preisen passen immer zur Anzeige (Index in Punkten, Fonds in Dollar, Euro). */
+  /* Widersprüche zwischen Struktur und Mustern auflösen: Ein Fortsetzungsmuster gegen eine gebrochene Struktur oder gegen ein jüngeres
+     Umkehrmuster der Gegenrichtung (etwa bullischer Wimpel nach V-Top) bleibt sichtbar, zählt aber weniger und dient nicht als Trigger. */
+  X.patConflicts = function (pats, st) {
+    (pats || []).forEach(function (o) {
+      if (o.cat !== 'cont' || !o.dir || o.st === 'fail') return;
+      var why = '';
+      if (st && st.broken && st.bias === -o.dir) why = (o.dir > 0 ? 'Aufwärtsstruktur gebrochen (CHoCH nach unten)' : 'Abwärtsstruktur gebrochen (CHoCH nach oben)') + ' – Fortsetzung fraglich';
+      else {
+        var rv = pats.filter(function (r) { return r.cat === 'rev' && r.dir === -o.dir && r.st !== 'fail' && r.q >= 50 && (r.at || r.i1 || 0) >= (o.at || o.i1 || 0) - 5; })[0];
+        if (rv) why = 'jüngeres ' + (o.dir > 0 ? 'Topmuster' : 'Bodenmuster') + ' (' + rv.n + ') dagegen';
+      }
+      if (!why) return;
+      o.against = why;
+      o.q = Math.max(0, (o.q || 0) - 15);
+      o.why = (o.why ? o.why + '; ' : '') + why;
+    });
+    return pats;
+  };
   X.deep = function (a, opt) {
     if (!a || !a.zz) return null;
     var lvl = opt && opt.lvl === 'sub' ? 'sub' : 'prim', key = lvl + '|' + (opt && opt.unit || '');
@@ -10098,7 +10163,8 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     /* Kursziele aus der Zählung: jede nächste Welle mit Zielzone (Fibonacci-Spanne) und Treffpunkt mit Konfluenz-Zonen */
     if (wv) X.waveTargets(a, wv, conf);
     var pats = X.patterns(a, { conf: conf, st: st, P: pivots(zMin), PM: pivots(zMaj), wv: wv });
-    var sc = X.scenarios(a, { st: st, conf: conf, pats: pats, wv: wv, fib: fib });
+    X.patConflicts(pats, st);
+    var sc = X.scenarios(a, { st: st, conf: conf, pats: pats, wv: wv, fib: fib, vp: vp });
     var su = X.setup(a, { st: st, conf: conf, sc: sc, pats: pats, wv: wv });
     var out = { lvl: lvl, st: st, vp: vp, fib: fib, fibP: fibP, fibS: fibS, conf: conf, wv: wv, pats: pats, focus: X.focus(pats, { trend: st.trend }), sc: sc, su: su };
     out.co = X.coherence(a, out);
@@ -10594,6 +10660,23 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
   X.bracket = function (o) {
     return { symbol: o.t, side: o.side === 'short' ? 'sell' : 'buy', qty: String(o.qty), type: 'market', time_in_force: 'day', order_class: 'bracket',
       take_profit_limit_price: X.cents(o.target).toFixed(2), stop_loss_stop_price: X.cents(o.stop).toFixed(2) };
+  };
+
+  /* ---------- Hebel-Check für kurzfristige Trades (nur Daytrading/Kurzfrist) ----------
+     Knock-out mit Puffer hinter dem Stop (ein Fünftel der Tagesspanne): Hebel = Einstieg ÷ (Einstieg − Schwelle). Dazu: Wie stark schwankt das
+     Hebelprodukt an einem normalen Tag (Tagesspanne % × Hebel)? Liegt der Stop im Rauschen der Fünf-Minuten-Kerzen? Ist er weiter weg als
+     eine ganze Tagesspanne (für einen Daytrade kaum erreichbar, Position dann sehr klein)? Long: Stop unter dem Einstieg. */
+  X.levCheck = function (o) {
+    var e0 = o.entry, st = o.stop, dist = e0 - st;
+    if (!(e0 > 0) || !(st > 0) || !(dist > 0)) return null;
+    var atrD = o.atrD > 0 ? o.atrD : null, ko = atrD ? st - 0.2 * atrD : st * 0.995, lev = ko > 0 ? e0 / (e0 - ko) : null;
+    var swing = atrD && lev ? atrD / e0 * 100 * lev : null, noise = o.atr5 > 0 ? dist / o.atr5 : null, dayR = atrD ? dist / atrD : null, warns = [];
+    if (swing != null && swing >= 50) warns.push('Mit Hebel ' + nf(lev, 0) + ' schwankt das Produkt an einem normalen Tag um etwa ' + nf(swing, 0) + ' % – sehr riskant.');
+    else if (swing != null && swing >= 25) warns.push('Mit Hebel ' + nf(lev, 0) + ' schwankt das Produkt an einem normalen Tag um etwa ' + nf(swing, 0) + ' %.');
+    if (noise != null && noise < 1.5) warns.push('Stop nur ' + nf(noise, 1) + '× die Spanne der Fünf-Minuten-Kerzen entfernt – im normalen Rauschen.');
+    if (dayR != null && dayR > 1) warns.push('Stop weiter weg als eine ganze Tagesspanne (' + nf(dayR, 1) + '×): für einen Daytrade kaum erreichbar, die Position wird sehr klein.');
+    if (lev != null && lev > 20) warns.push('Ein Hebel über 20 lässt kaum Luft: Schon kleine Kurslücken erreichen die Knock-out-Schwelle.');
+    return { stopPct: dist / e0 * 100, ko: ko, lev: lev, swing: swing, noise: noise, dayR: dayR, warns: warns };
   };
 
   /* ---------- trader-news: Schlagworte und Bewegung ---------- */
@@ -13989,36 +14072,42 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     }
     if (rows.length) h += BC.ui.stats(rows, 'is-wide');
     /* Konfluenz */
+    /* Lange Tabellen einklappbar: oben steht je Abschnitt nur das Wichtigste (nächste Marke über und unter dem Kurs) */
+    function fd(k, title, hint, body) { return '<details class="ct-fold pro-fold" data-k="st-' + k + '"><summary><span>' + e(title) + '</span>' + (hint ? '<small>' + hint + '</small>' : '') + '</summary><div class="ct-fold-b">' + body + '</div></details>'; }
+    function nearTxt(list, getV) {
+      var up = list.filter(function (x) { return getV(x) > p; }).sort(function (x, y) { return getV(x) - getV(y); })[0], dn = list.filter(function (x) { return getV(x) < p; }).sort(function (x, y) { return getV(y) - getV(x); })[0];
+      return [up ? '↑ ' + Px(getV(up)) : '', dn ? '↓ ' + Px(getV(dn)) : ''].filter(Boolean).join(' · ');
+    }
     if (d.conf.length) {
-      h += '<h4 class="ta-sub">Konfluenz-Zonen <span class="ta-n">' + d.conf.length + '</span></h4><table class="ta-tab pro-tab"><thead><tr><th>Zone</th><th>Abstand</th><th>Treffen sich</th></tr></thead><tbody>' +
+      h += fd('conf', 'Konfluenz-Zonen (' + d.conf.length + ')', nearTxt(d.conf, function (z) { return z.mid; }), '<table class="ta-tab pro-tab"><thead><tr><th>Zone</th><th>Abstand</th><th>Treffen sich</th></tr></thead><tbody>' +
         d.conf.slice().sort(function (x, y) { return y.mid - x.mid; }).map(function (z) {
           var near = Math.abs(z.mid / p - 1) < 0.03;
           return '<tr class="' + (near ? 'is-near' : '') + '"><td>' + Px(z.lo) + '–' + Px(z.hi) + '<small class="pro-dots" aria-label="Stärke ' + Math.round(z.score) + '">' + '●'.repeat(Math.min(5, Math.max(1, Math.round(z.score / 1.5)))) + '</small></td>' +
             '<td class="is-' + (z.mid >= p ? 'up' : 'down') + '">' + dist(z.mid, p) + '</td><td>' + e(z.src.slice(0, 4).join(', ')) + '</td></tr>';
-        }).join('') + '</tbody></table>';
+        }).join('') + '</tbody></table>');
     }
     /* Unterstützungen und Widerstände als Bänder mit Tests */
     var bands = a.levels.res.concat(a.levels.sup).filter(function (x) { return ok(x.v); }).sort(function (x, y) { return y.v - x.v; });
     if (bands.length) {
       /* Widerstände über, Unterstützungen unter dem Kurs – mit dem Kurs als Zeile dazwischen (die frühere Leiter „Unterstützungen, Widerstände“) */
       var rg = a.range || {}, nowRow = '<tr class="is-now"><td>' + Px(p) + '</td><td>Kurs</td><td>Schluss</td></tr>', put = false;
-      h += '<h4 class="ta-sub">Widerstände und Unterstützungen</h4><table class="ta-tab pro-tab"><thead><tr><th>Band</th><th>Tests</th><th>Abstand</th></tr></thead><tbody>' + bands.map(function (x) {
+      h += fd('bands', 'Widerstände und Unterstützungen', nearTxt(bands, function (x) { return x.v; }), '<table class="ta-tab pro-tab"><thead><tr><th>Band</th><th>Tests</th><th>Abstand</th></tr></thead><tbody>' + bands.map(function (x) {
         var lo = ok(x.lo) ? x.lo : x.v - 0.15 * a.volat.atr, hi = ok(x.hi) ? x.hi : x.v + 0.15 * a.volat.atr, pre = '';
         if (!put && x.v < p) { pre = nowRow; put = true; }
         var ext = x.kind === 'res' && ok(rg.hi52) && x.v >= rg.hi52 * 0.995 ? '52-W-Hoch' : (x.kind === 'sup' && ok(rg.lo52) && x.v <= rg.lo52 * 1.005 ? '52-W-Tief' : (x.major ? 'groß' : ''));
         return pre + '<tr><td><span class="pro-k is-' + (x.v >= p ? 'res' : 'sup') + '"></span>' + Px(lo) + '–' + Px(hi) + '</td><td>' + x.n + '×' + (ext ? ' <small>' + ext + '</small>' : '') + '</td><td class="is-' + (x.v >= p ? 'up' : 'down') + '">' + dist(x.v, p) + '</td></tr>';
-      }).join('') + (put ? '' : nowRow) + '</tbody></table>';
+      }).join('') + (put ? '' : nowRow) + '</tbody></table>');
     }
     if (o.lines) h += o.lines;
     /* Volumenprofil */
     if (d.vp) {
       var vp = d.vp;
-      h += '<h4 class="ta-sub">Volumenprofil</h4>' + BC.ui.stats([
+      h += fd('vp', 'Volumenprofil', 'POC ' + Px(vp.poc) + ' · ' + (p > vp.vah ? 'Kurs über dem fairen Bereich' : (p < vp.val ? 'Kurs unter dem fairen Bereich' : 'Kurs im fairen Bereich')), BC.ui.stats([
         ['Point of Control', Px(vp.poc) + '<small>meistgehandelter Preis · ' + dist(vp.poc, p) + '</small>'],
         ['Value Area (70 %)', Px(vp.val) + '–' + Px(vp.vah) + '<small>' + (p > vp.vah ? 'Kurs darüber: Käufer haben die Kontrolle' : (p < vp.val ? 'Kurs darunter: Verkäufer haben die Kontrolle' : 'Kurs im fairen Bereich')) + '</small>'],
         vp.hvn.length ? ['Volumen-Knoten (HVN)', vp.hvn.map(function (x) { return Px(x.v); }).join(' · ') + '<small>dort bremst der Kurs oft</small>'] : null,
         vp.lvn.length ? ['Volumen-Lücken (LVN)', vp.lvn.map(function (x) { return Px(x.v); }).join(' · ') + '<small>dort läuft der Kurs oft schnell durch</small>'] : null
-      ], 'is-wide');
+      ], 'is-wide'));
     }
     /* Fibonacci zweistufig */
     var fibRow = function (f, name) {
@@ -14027,9 +14116,11 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       return '<tr><td>' + e(name) + '<small>' + (f.up ? 'Anstieg ' : 'Rückgang ') + Px(f.a.p) + ' → ' + Px(f.b.p) + '</small></td><td colspan="2">' +
         key.map(function (l) { return '<span class="pro-fib' + (Math.abs(l.v / p - 1) < 0.02 ? ' is-near' : '') + '">' + e(l.lab) + ' ' + Px(l.v) + '</span>'; }).join(' ') + '</td></tr>';
     };
-    if (o.fib || d.fibP || d.fibS) h += '<h4 class="ta-sub">Fibonacci</h4>' + (o.fib || '');
-    if (d.fibP || d.fibS) h += '<table class="ta-tab pro-tab is-fib"><tbody>' + fibRow(d.fibP, 'Primär-Swing') +
-      (d.fibS && (!d.fibP || d.fibS.a.i !== d.fibP.a.i || d.fibS.b.i !== d.fibP.b.i) ? fibRow(d.fibS, 'Sub-Swing') : '') + '</tbody></table>';
+    if (o.fib || d.fibP || d.fibS) {
+      var fk = d.fibP ? d.fibP.levels.concat(d.fibP.ext).filter(function (l) { return l.v > 0 && l.r !== 0 && l.r !== 1; }) : [];
+      h += fd('fib', 'Fibonacci', fk.length ? nearTxt(fk, function (l) { return l.v; }) : '', (o.fib || '') + (d.fibP || d.fibS ? '<table class="ta-tab pro-tab is-fib"><tbody>' + fibRow(d.fibP, 'Primär-Swing') +
+        (d.fibS && (!d.fibP || d.fibS.a.i !== d.fibP.a.i || d.fibS.b.i !== d.fibP.b.i) ? fibRow(d.fibS, 'Sub-Swing') : '') + '</tbody></table>' : ''));
+    }
     return h + '<p class="ta-note">Struktur aus den Wendepunkten (Schlusskurse entscheiden über BOS und CHoCH). Konfluenz: mindestens zwei verschiedene Bausteine (Fibonacci, Durchschnitte, Preisbänder, Volumen, Struktur, Trendlinien) innerhalb einer halben Tagesspanne. Volumenprofil der letzten rund zwölf Monate.</p>';
   };
 
@@ -14672,8 +14763,21 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var h = '<div class="ta-strip" role="img" aria-label="Trendphasen im Verlauf">' + segs.map(function (x) {
       if (seen.indexOf(x.ph) < 0) seen.push(x.ph);
       return '<i class="ph-' + x.ph + '" style="width:' + ((x.i1 - x.i0 + 1) / span * 100).toFixed(2) + '%"></i>';
-    }).join('') + '</div><div class="ta-strip-l"><span>' + e(dfull(segs[0].t0)) + '</span><span>heute</span></div>';
+    }).join('') + '</div><div class="ta-strip-l"><span>Trendphasen ab ' + e(dfull(segs[0].t0)) + '</span><span>bis ' + e(dfull(a.t)) + '</span></div>';
     return h + '<p class="ta-keys">' + seen.map(function (k) { return '<span><i class="ph-' + k + '"></i>' + e(BC.ta.PHASES[k].n) + '</span>'; }).join('') + '</p>';
+  }
+  /* Die Kaufwertung gilt für Tageskerzen. Laufen Woche oder Stunde dagegen, steht das direkt darunter – statt es in die eine Zahl zu pressen */
+  function tfConflictHtml(a) {
+    var NM = { bull: 'aufwärts', bear: 'abwärts', flat: 'seitwärts' }, parts = [], against = 0;
+    [['w', 'Woche'], ['h1', 'Stunde']].forEach(function (x) {
+      var o = tfA(x[0]);
+      if (!o || !o.tone) return;
+      var vs = o.tone !== a.tone && o.tone !== 'flat' && a.tone !== 'flat';
+      if (vs) against++;
+      parts.push(x[1] + ' ' + NM[o.tone] + (vs ? ' (dagegen)' : ''));
+    });
+    if (!parts.length) return '<p class="ta-tfc" id="taTfc" hidden></p>';
+    return '<p class="ta-tfc' + (against ? ' is-warn' : '') + '" id="taTfc">Gilt für Tageskerzen (' + NM[a.tone] + '). ' + e(parts.join(' · ')) + (against ? ' – das Setup passt nur zu diesem Horizont.' : ' – die Zeitfenster passen zusammen.') + '</p>';
   }
   function heroHtml(a) {
     var ph = a.phaseInfo, b = a.buy, en = a.entry;
@@ -14688,7 +14792,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       '<div class="ta-gauge" aria-hidden="true"><i style="left:' + U.clamp(b.v, 1, 100) + '%"></i></div><div class="ta-gauge-l"><span>1</span><span>meiden</span><span>abwarten</span><span>attraktiv</span><span>100</span></div>' +
       '<div class="ta-hero-top">' + (ph ? '<span class="ta-phase is-' + TONE[a.tone] + '">' + e(ph.n) + '</span>' : '') +
       (ph && a.phaseDays != null && a.phaseDays >= 3 ? '<span class="ta-since">seit ' + e(F().seit(a.phaseDays)) + ' · ' + e(ph.stage) + '</span>' : '') + '</div>' +
-      '<p class="ta-brief">' + e(a.brief) + '</p>' +
+      '<p class="ta-brief">' + e(a.brief) + '</p>' + tfConflictHtml(a) +
       '<div class="ta-tiles">' + tiles + '</div>' + stripHtml(a) + '</div>';
   }
   /* Einstiegs-Check: Ampel, Plan aus dem Chart, Prüfpunkte zum Aufklappen */
@@ -14699,6 +14803,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     if (en.trigger) h += '<p class="ta-trigger">' + UI.icon('bolt') + '<span>' + e(en.trigger.t) + ': <strong>' + (en.trigger.v0 ? P(en.trigger.v0) + ' – ' : '') + P(en.trigger.v) + '</strong></span></p>';
     if (en.trigger2) h += '<p class="ta-trigger is-2">' + UI.icon('bolt') + '<span>' + e(en.trigger2.t) + ': <strong>' + P(en.trigger2.v) + '</strong></span></p>';
     if (en.warn) h += '<p class="ta-warn">' + UI.icon('calendar') + '<span>' + e(en.warn) + '</span></p>';
+    if (en.guard && en.guard.length) h += '<p class="ta-warn is-guard">' + UI.icon('shield') + '<span>Leitplanke: ' + e(en.guard.join(' · ')) + '</span></p>';
     if (pl && dup) h += '<p class="ta-plan-why">Einstieg, Stop und Ziel dieses Checks stehen oben im Setup.</p>';
     else if (pl) {
       var cells = [['Einstieg', pl.kind === 'ausbruch' ? 'über ' + P(pl.entry) : (pl.kind === 'rücksetzer' && pl.zone ? P(pl.zone[0]) + ' – ' + P(pl.zone[1]) : P(pl.entry)),
@@ -14724,7 +14829,8 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var line = F().pct(tu.fall, 0) + ' vom Hoch · Tief ' + P(tu.low.v) + ' am ' + dshort(tu.low.t) + (tu.base && !tu.base.conf ? ' (noch unbestätigt)' : '');
     h += '<div class="ta-hero ta-turn is-' + tu.tone + '"><div class="ta-buy"><div class="ta-buy-n"><span class="ta-l">Umkehr-Chance</span><span class="ta-score"><b>' + tu.score + '</b><small>/100</small></span></div>' +
       '<div class="ta-buy-t"><strong class="ta-label">' + e(tu.label) + '</strong><span class="ta-buy-s">' + e(line) + '</span></div></div>' +
-      '<div class="ta-gauge" aria-hidden="true"><i style="left:' + U.clamp(tu.score, 1, 100) + '%"></i></div><div class="ta-gauge-l"><span>1</span><span>keine</span><span>Anzeichen</span><span>möglich</span><span>100</span></div></div>';
+      '<div class="ta-gauge" aria-hidden="true"><i style="left:' + U.clamp(tu.score, 1, 100) + '%"></i></div><div class="ta-gauge-l"><span>1</span><span>keine</span><span>Anzeichen</span><span>möglich</span><span>100</span></div></div>' +
+      (tu.guard && tu.guard.length ? '<p class="ta-warn is-guard">' + UI.icon('shield') + '<span>Gedeckelt: ' + e(tu.guard.join(' · ')) + '</span></p>' : '');
     /* Lage in Worten: Boden (mit Art), zurück an der Marke, noch abwärts, Signal am laufenden Tag */
     if (tu.st === 'boden' && tu.base && tu.base.kind) h += '<p class="ta-trigger is-up">' + UI.icon('check') + '<span>Boden: ' + e(BC.ta.BASE_N[tu.base.kind]) +
       (tu.base.kind === 'w' && tu.base.top ? ' mit Nackenlinie bei <strong>' + P(tu.base.top) + '</strong>' : (tu.base.kind === 'hl' && tu.base.hl ? ' bei ' + P(tu.base.hl.v) + ' über dem Tief von ' + P(tu.low.v) : '')) +
@@ -15089,6 +15195,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     if (tab !== 'facts' || sub !== 'tech' || !tech.a || !sym) return;
     var a = tech.a, dd = BC.struct.deep(a, dOpt('prim')), P = tpx(), el;
     if ((el = byId('taSum'))) el.innerHTML = sumBody(a, dd);
+    if ((el = byId('taTfc'))) el.outerHTML = tfConflictHtml(a);
     if ((el = byId('taMtf'))) el.innerHTML = mtfBody();
     if ((el = byId('taSetup'))) el.innerHTML = setupBody(a, dd);
     if ((el = byId('taEvents'))) el.innerHTML = eventsBody();
@@ -15210,7 +15317,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       '<div class="ct-scenbar" id="ctScenBar" role="group" aria-label="Szenario im Chart"></div>' +
       '<div class="ct-zoom" id="ctZoom"></div>' + ctCtlHtml() +
       '<div class="ct-legend" id="ctLegend"></div>' +
-      '<footer class="panel-src">Alles automatisch eingezeichnet. Kurse am rechten Rand gehören zu den Linien gleicher Farbe; die schraffierte Fläche rechts zeigt mögliche Pfade, keine Prognose. Zoomen: zwei Finger auseinander oder seitlich, oder die Knöpfe unter dem Chart.</footer></section>' +
+      '<details class="ct-fold panel-src"><summary><span>So liest du den Chart</span></summary><div class="ct-fold-b">Alles automatisch eingezeichnet. Kurse am rechten Rand gehören zu den Linien gleicher Farbe; die schraffierte Fläche rechts zeigt mögliche Pfade – sie stoßen an Zwischenmarken an, bevor sie weiterlaufen –, keine Prognose. Zoomen: zwei Finger auseinander oder seitlich, oder die Knöpfe unter dem Chart.</div></details></section>' +
       '<div id="ctInfo"></div>';
   }
   var CT_VIEWS = [{ v: 'klar', n: 'Klar' }, { v: 'alles', n: 'Alles' }];
@@ -15591,7 +15698,13 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var P = tpx();
     var lb = a.bars && a.bars[a.bars.length - 1], live = barRunning(lb) && lb.lt;
     var when = function (t) { return dfull(t) + (intra ? ' ' + U.clock(t) : ''); };
-    if (!b) { el.innerHTML = '<strong>' + P(a.p) + '</strong><span>' + e((a.phaseInfo && k === 'd' ? a.phaseInfo.n + ' · ' : CT_KN[k] + ' · ') + (live ? 'live ' + U.clock(lb.lt) + ' Uhr' : (intra ? 'Stand ' + when(a.t) : 'Schluss ' + dfull(a.t)))) + '</span>'; return; }
+    if (!b) {
+      /* Kleine Kerzen: Die Zeit ist der Beginn der letzten Kerze; weicht ihr Schluss vom Schlusskurs der Börse ab (Schlussauktion), steht dieser dabei */
+      var q0 = A.q[cid()], off = !live && q0 && U.ok(q0.p) && q0.p > 0 && Math.abs(a.p / q0.p - 1) > 0.0005 && BC.hours.status(Date.now()).state !== 'open';
+      el.innerHTML = '<strong>' + P(a.p) + '</strong><span>' + e((a.phaseInfo && k === 'd' ? a.phaseInfo.n + ' · ' : CT_KN[k] + ' · ') + (live ? 'live ' + U.clock(lb.lt) + ' Uhr' : (intra ? 'letzte Kerze ab ' + when(a.t) + ' Uhr' : 'Schluss ' + dfull(a.t))) +
+        (off && intra ? ' · Schlusskurs der Börse ' + P(q0.p) + ' (Schlussauktion)' : '')) + '</span>';
+      return;
+    }
     el.innerHTML = '<strong>' + P(b.c) + '</strong><span>' + e(when(b.t)) + ' · Hoch ' + P(b.h) + ' · Tief ' + P(b.l) + '</span>';
   }
   /* ---------- „Wieso, weshalb, warum“ unter der Chart-Technik ---------- */
@@ -15738,6 +15851,8 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var cls = x.k === 'bull' ? 'up' : (x.k === 'bear' ? 'down' : 'flat'), done = x.k === 'bull' ? p > x.trig.v : (x.k === 'bear' ? p < x.trig.v : p >= x.lo && p <= x.hi);
     rows.push(['Trigger', e(x.trig.txt) + (x.k !== 'range' ? ' <small>' + (done ? 'ausgelöst' : F().pct((x.trig.v / p - 1) * 100) + ' vom Kurs' + (x.why && x.why.dist != null ? ' · ' + nf(x.why.dist, 1) + ' Tagesspannen' : '')) + '</small>' : '')]);
     rows.push(['Bestätigung', e(x.conf)]);
+    /* Zwischenmarken: was der Pfad zuerst testet oder überwinden muss, bevor das Ziel ansteht */
+    if (x.gate) rows.push(['Weg zum Ziel', e(x.gate.charAt(0).toUpperCase() + x.gate.slice(1)) + ' <small>so ist auch der Pfad im Chart gezeichnet</small>']);
     (x.tgts || []).slice(0, 3).forEach(function (t, i) { rows.push([i ? '' : (x.k === 'range' ? 'Ränder' : 'Zielzone'), P(t.v) + ' <small>' + e(t.txt || '') + ' · ' + F().pct((t.v / p - 1) * 100) + '</small>']); });
     if (x.inval) rows.push(['Ungültig', e(x.inval.txt)]);
     var why = x.why || { pro: [], con: [] }, stt = x.status || { s: 'waiting' };
@@ -15884,11 +15999,12 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     cfg = cfg || ctCfg();
     var sw = BC.state.ct.scen || '', scB = d && sw ? (sw === 'all' ? scenAllHtml(a, d, P) : scenBlockHtml(a, d, sw, P)) : '';
     var kk0 = BC.state.ct.k || 'd', ltB = d && !sw && (kk0 === 'w' || kk0 === 'm') ? ltHtml(a, d, P, kk0) : '';
-    var why = d ? (ctSel && !(sw && ctSel === 'scen:' + sw) ? ctSelHtml(a, d, P) : '') + scB + ltB + (cfg.mode === 'fokus' ? ctWhyFokus(a, d, P) : ctWhyMode(a, d, f, cfg, P)) : '';
+    /* Mit gewähltem Szenario steht der Plan nur im Szenario-Block – die Setup-Erklärung darunter würde Einstieg, Stop und Ziel wiederholen */
+    var why = d ? (ctSel && !(sw && ctSel === 'scen:' + sw) ? ctSelHtml(a, d, P) : '') + scB + ltB + (sw ? '' : (cfg.mode === 'fokus' ? ctWhyFokus(a, d, P) : ctWhyMode(a, d, f, cfg, P))) : '';
     /* Andere Kerzen oder Swing-Ebene als die Technik-Seite: sagen, warum Aussagen dort anders lauten können */
     var k0 = BC.state.ct.k || 'd', lv0 = BC.state.ct.lvl || 'prim', diff = k0 !== 'd' || lv0 !== 'prim';
     if (diff && d) why = '<p class="fact-s ct-tfhint">Gerechnet mit ' + e(CT_KN[k0]) + (lv0 === 'sub' ? ' und kleinen Schwüngen (Sub)' : '') + '. Die Technik-Seite rechnet mit Tageskerzen und großen Schwüngen – Struktur, Wellen und Szenarien können dort anders lauten, weil sie ein anderes Zeitfenster beschreiben.</p>' + why;
-    h += UI.panel(cfg.mode === 'fokus' ? 'Warum dieses Setup?' : (cfg.mode === 'custom' ? 'Im Chart' : 'Was du siehst – und warum'), '<div class="ct-why">' + why + '</div>', { cls: 'ta-panel ct-whyp' });
+    h += UI.panel(sw ? 'Szenario im Fokus' : (cfg.mode === 'fokus' ? 'Warum dieses Setup?' : (cfg.mode === 'custom' ? 'Im Chart' : 'Was du siehst – und warum')), '<div class="ct-why">' + why + '</div>', { cls: 'ta-panel ct-whyp' });
     var more = '';
     if (d && cfg.mode !== 'custom') more += '<details class="ct-more" data-k="sum"><summary>Kurzfassung: Struktur, Welle, Muster, Szenario</summary>' + ctProHtml(a, d, P) + '</details>';
     if (f) more += '<details class="ct-more" data-k="fib"' + (cfg.mode === 'fib' || cfg.mode === 'custom' ? ' open' : '') + '><summary>Fibonacci-Tabelle</summary>' + ctFibTable(a, f, P) + '</details>';
@@ -16031,7 +16147,9 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     if (!el || !sym) return;
     [].forEach.call(document.querySelectorAll('.ct-tf-note'), function (tn) { tn.textContent = ctNote(); });
     htfLoad('w');
-    if ((st.tf || 'd') === 'm' || k === 'm') htfLoad('m');
+    htfLoad('m');
+    /* Vorladen: Stunden- und Vier-Stunden-Kerzen im Hintergrund, damit der Wechsel ohne Ladezustand geht (einmal je Wert) */
+    if (tech.a && !isCrypto() && ltf.pre !== cid()) { ltf.pre = cid(); var pid = cid(); setTimeout(function () { if (sym && cid() === pid && tab === 'facts' && sub === 'chart') { ltfLoad('h1'); setTimeout(function () { if (sym && cid() === pid) ltfLoad('h4'); }, 2500); } }, 1500); }
     if (!a) {
       if (!tech.a) return;
       tfLoad(k);
@@ -16225,6 +16343,12 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     day5.run = BC.trader.run(day5.d.bars, { fx: BC.paper.fxOf(csym()), now: Date.now(), live: freshP(), sym: csym() });
     drawTrade();
   }
+  /* Daytrading und Tickets rechnen mit dem gehandelten Fonds: in Punkten oder je Unze sagt eine Zeile, warum die Kurse anders aussehen */
+  function unitTradeNote() {
+    var ux = ptsOn() ? idxOf() : null, x = ux ? idxR() : null;
+    if (!ux || !x) return '';
+    return 'Gehandelt wird der Fonds ' + sym.t + ': Alle Kurse in diesem Reiter sind Fondskurse in $. Oben, im Chart und in der Technik steht ' + (ux.kind === 'idx' ? 'der ' + ux.n + ' in Punkten (Fonds × ' + U.num(x.r, 2) + ')' : ux.n + (ux.cur ? ' je ' + ux.u : '') + ' (umgerechnet aus dem Fonds)') + '.';
+  }
   function drawTrade() {
     if (tab !== 'facts' || sub !== 'trade' || !sym) return;
     var el = byId('sTrade'), pp = byId('sPaper');
@@ -16235,7 +16359,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     el.innerHTML = BC.trader.html({ sym: csym(), run: day5.run, wait: !day5.d && !day5.err, err: day5.err, news: news.all, short: tech.a ? tech.a.short : null,
       daily: tech.d ? tech.d.bars : null, quote: liveQ(), P: tpxRaw(), metrics: metrics, cong: { list: cong.list, err: cong.err, wait: cong.wait, none: !fh },
       /* PTR des Repräsentantenhauses aus deiner GitHub-Action (45 Tage); null = noch keine Daten */
-      ptr: tech.ctx && tech.ctx.P && tech.ctx.P.cg ? (BC.scan.cgFor(tech.ctx.P.cg, sym.t) || []) : null });
+      ptr: tech.ctx && tech.ctx.P && tech.ctx.P.cg ? (BC.scan.cgFor(tech.ctx.P.cg, sym.t) || []) : null, unit: unitTradeNote() });
     /* Aufgeklappte Einstellungen bleiben beim Neuzeichnen offen */
     el.querySelectorAll('details.pro-set').forEach(function (d, i) { if (open[i]) d.open = true; });
   }
@@ -18671,6 +18795,8 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
           '<p><strong>Szenario im Fokus</strong>: Ist ein Szenario gewählt, blendet der Chart Wellen, Muster, Struktur und Seitenbeschriftungen aus und zeigt nur Trigger, Zielzonen und Ungültig-Marke. Darunter steht der <strong>Einstiegs-Status</strong> – <strong>wartet</strong> (noch kein Schluss über bzw. unter dem Trigger; eine laufende Kerze zählt erst nach ihrem Schluss), <strong>ausgelöst</strong> (Schluss jenseits des Triggers) oder <strong>abgelaufen</strong> (zu lange her oder schon wieder zurück: Fehlausbruch) –, dazu <strong>Ausstieg und Alarme</strong> (Stop, Ziele, beim Daytrade glattstellen vor Handelsschluss, Hinweis auf Kurslücken: ein Stop wird zur Marktorder und kann schlechter ausgeführt werden), ein Knopf für Kursalarme an Trigger, Stop und Ziel und einer für den Papier-Trade mit Risiko-Prüfung (PASS oder BLOCK, Freigabe immer von Hand).</p>' +
           '<p><strong>Realitätscheck</strong> im Szenario: wie oft in der eigenen Kursgeschichte zuerst das Ziel, zuerst der Stop oder bis zum Ende keins von beiden erreicht wurde – einmal aus der echten Geschichte, einmal als Replay aus zufällig neu zusammengesetzten Abschnitten mit festem Startwert (Seed 19, wiederholbar). Eine Simulation, keine Prognose und keine Garantie.</p>' +
           '<p><strong>Schnell-Übersicht</strong> über dem Chart: Lage, Hauptszenario mit Trigger, Welle bzw. Struktur und die entscheidende Marke mit Ungültig-Marke – auf einen Blick. Ist ein Szenario gewählt, tritt sie zurück: Dann steht alles im Szenario-Block, und Begründung, Ausstieg und Alarme, Realitätscheck sowie „Vor dem Trade“ sind dort einklappbar, damit nichts doppelt steht. Der aktive Daytrade mit Eröffnungsspanne und Zeitmaschine bleibt im Reiter Daytrading.</p>' +
+          '<p><strong>Pfade an Marken</strong>: Die möglichen Wege rechts im Chart laufen nicht stumpf durch. Liegt vor dem Trigger oder vor dem Ziel eine Unterstützung, ein Widerstand, eine Konfluenz-Zone, ein Volumen-Knoten (POC/HVN) oder ein gleitender Durchschnitt, stößt der Pfad dort an, fällt zurück und läuft erst dann weiter – nach einem Ausbruch mit Rücktest der Marke. Im Szenario-Block steht unter „Weg zum Ziel“, welche Zwischenmarke zuerst getestet oder überwunden werden muss.</p>' +
+          '<p><strong>Leitplanken der Wertungen</strong>: Kaufwertung (Trend und Qualität), Umkehr-Chance (nur echte Bodensignale) und Setup-Güte (Marken, Trigger, Chance zu Risiko) sind getrennt. Chance zu Risiko unter 1 : 1 deckelt Einstiegs- und Setup-Wert. Stark überverkauft im Abwärtstrend (fallendes Messer) bringt keinen Pluspunkt. Ohne Strukturbeleg (Signal, höheres Tief, Linienbruch, Doppelboden, Divergenz, gehaltenes Tief) bleibt die Umkehr-Chance klein; ein starker Abwärtstrend (ADX ab 25) bremst sie zusätzlich. Was gedeckelt wurde, steht beim Check. Unter der Kaufwertung steht, ob Woche oder Stunde gegen die Tageskerzen laufen. Ein Bullisch-Muster gegen eine gebrochene Struktur oder nach einem jüngeren Topmuster bleibt sichtbar, zählt aber weniger und dient nicht als Trigger.</p>' +
           '<p><strong>Langfrist-Bild</strong> in Wochen- und Monatskerzen: übergeordneter Trend und Struktur, die wichtigste große Formation (Kanal, Keil, Dreieck, Boden, Top …) mit Status – in Ausbildung, Bruch (bestätigt) oder ungültig – und ihre Einordnung. Steckt ein Aufwärtstrend im Rücksetzer: Korrekturtiefe vom Hoch und in Prozent des letzten Anstiegs, Korrekturzone (38,2–61,8 % des Anstiegs), die Marke, ab der der Trend weiterläuft, und die, unter der er gefährdet ist – auch im Chart eingezeichnet. Fehlen die Wochenkerzen, fasst die App sie aus den Tageskerzen zusammen und sagt das dazu.</p>' +
           '<p><strong>Fonds in Punkten oder je Unze</strong> (QQQ, SPY, GLD, SLV, USO …): Der Scanner rechnet mit dem Fondskurs. Auf der Aktienseite stehen seine Marken umgerechnet in der Einheit der Ansicht, der Rechner zählt Anteile des Fonds. Token-Kurse für Nachbörse und Nacht gelten für den Fonds und werden wie er umgerechnet.</p>' +
           '<p><strong>Vor dem Trade</strong> (unter Technik und im Szenario): Tagesbewegung, frische Schlagzeilen mit Themen, Pflichtmeldungen der letzten fünf Tage (etwa 8-K), nächste Quartalszahlen mit Gewinnerwartung und letzter Überraschung, große US-Termine. Dazu als Hintergrund die <strong>Kongress-Meldungen (PTR)</strong> des Repräsentantenhauses: Abgeordnete melden Käufe bis zu 45 Tage nach dem Handel – das ist kein Signal. Die Daten holt deine GitHub-Action, sie erscheinen nach ihrem nächsten Lauf.</p>' +
@@ -18682,6 +18808,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
           '<ul><li><strong>Einstieg</strong>: wartet, ausgelöst oder abgelaufen – nur abgeschlossene Kerzen zählen. Liegt der Auslöser mehr als eine Kerze zurück, steht das dabei: ein später Einstieg ist ein anderer Trade (Kurs, Stop-Abstand und Chancen haben sich verschoben).</li>' +
           '<li><strong>Ausstieg</strong>: Stop Mitte oder Tief der Spanne, Prozent, ATR oder eigener Kurs, immer auf den Cent weg vom Einstieg. Der ATR-Stop rechnet mit den letzten 14 Fünf-Minuten-Kerzen, früh am Tag mit allen bisherigen (um 10:15 Uhr sind es 9) und sagt das dazu.</li>' +
           '<li><strong>Zeitmaschine</strong>: 10.000 simulierte Rest-Sitzungen aus den Fünf-Minuten-Kerzen der letzten 59 Sitzungen zur selben Uhrzeit (Startwert 19, wiederholbar), dazu die Regel auf den echten Sitzungen – die gibt es nur für die Eröffnungsspanne, denn eine eigene Marke ist keine Regel, die sich an früheren Tagen wiederholen lässt. Ein Realitätscheck, keine Prognose.</li>' +
+          '<li><strong>Hebel-Check</strong> (nur hier, im Kurzfrist-Teil): Knock-out-Schwelle mit Puffer hinter dem Stop, möglicher Hebel, wie stark das Hebelprodukt an einem normalen Tag schwankt, Stop gegen das Rauschen der Fünf-Minuten-Kerzen und gegen die Tagesspanne. Bei Fonds in Punkten (QQQ) oder je Unze (GLD) rechnet der ganze Reiter mit dem gehandelten Fonds in $ – das steht oben dabei.</li>' +
           '<li><strong>Frischer Kurs</strong>: Budget und Risiko-Prüfung rechnen ab dem höheren Wert aus Plan-Einstieg und aktuellem Kurs – aber nur, wenn der Kurs höchstens 15 Minuten alt ist. Ein gelaufener Kurs vergrößert das Risiko je Aktie.</li>' +
           '<li><strong>Risiko-Prüfung</strong>: PASS oder BLOCK vor jedem Ticket – größter Verlust je Trade, Tagesverlust-Grenze, Trades am Tag, Chance zu Risiko, Einstiegsfenster, Positionsgröße, Bargeld, auf Wunsch PDT-Schutz. Die Grenzen stellst du unter Trading-Regeln ein.</li>' +
           '<li><strong>Papierhandel ist Standard</strong>: Die App schickt nie eine Order an einen Broker. Jede Papier-Order zeigst du erst als Ticket an und gibst sie dann ausdrücklich frei. Stops lösen als Marktorder aus – bei Kurslücken schlechter als der Stop; die Slippage stellst du ein.</li>' +
@@ -21810,6 +21937,8 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
   TR.html = function (ctx) {
     var P = ctx.P, r = ctx.run, h = '', X0 = X(), dop = TR.opts(), rules = Object.assign({}, X0.RISK_DEF, st().rules);
     if (BC.sym.isCrypto(ctx.sym)) return '<p class="fact-s">Der Daytrading-Ablauf ist für US-Aktien gebaut: Eröffnungsspanne ab 9:30 Uhr New York, glattstellen 15:55 Uhr. Krypto handelt rund um die Uhr ohne Eröffnung.</p>';
+    /* Fonds in Punkten oder je Unze (QQQ, GLD …): gehandelt wird der Fonds – alle Kurse hier sind Fondskurse, der Kopf zeigt den Index */
+    if (ctx.unit) h += '<p class="ta-note pro-unit">' + BC.ui.icon('help') + '<span>' + e(ctx.unit) + '</span></p>';
     h += '<ol class="pro-steps">';
     /* 1 Scanner: die fünf Tages-Setups des Skills auf abgeschlossenen Tagesschlüssen, dazu das Kurzfrist-Setup der App */
     var dc = X0.dailyCloses(ctx.daily || []), ds = X0.dailySetups(dc), sh = ctx.short, last = dc.length ? dc[dc.length - 1] : null;
@@ -21887,7 +22016,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       (bu.why ? '<p class="ta-warn">' + BC.ui.icon('alert') + '<span>' + e(bu.why) + '</span></p>' : '') +
       '<ul class="pro-lims">' + bu.lim.map(function (x) { return '<li class="' + (x[0] === bu.by ? 'is-on' : '') + '"><span>' + e(x[1]) + '</span><b>' + (isFinite(x[2]) ? x[2] : '–') + '</b><small>' + e(x[3]) + '</small></li>'; }).join('') + '</ul>' +
       (r.live && r.live > pl.entry ? '<p class="fact-s">Gemessen ab dem Kurs ' + P(r.live) + ' (über dem Plan-Einstieg): ein höherer Kurs vergrößert das Risiko je Aktie.</p>' : '') +
-      (r.fx !== 1 ? '<p class="fact-s">Umgerechnet mit 1 € = ' + nf(r.fx, 4) + ' $.</p>' : ''), 'trader-budget');
+      (r.fx !== 1 ? '<p class="fact-s">Umgerechnet mit 1 € = ' + nf(r.fx, 4) + ' $.</p>' : '') + levHtml(ctx, r, pl, P), 'trader-budget');
     /* 7 Risiko */
     var rk = r.risk;
     h += step(7, 'Risiko-Prüfung', rk && rk.pass ? 'ok' : 'no', rk ? '<p class="pro-pass ' + (rk.pass ? 'is-pass' : 'is-block') + '"><b>' + (rk.pass ? 'PASS' : 'BLOCK') + '</b><span>' + e(rk.why) + '</span></p>' +
@@ -21921,6 +22050,19 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       '<p class="chips">' + UI().link('https://disclosures-clerk.house.gov/FinancialDisclosure', 'Repräsentantenhaus', 'chip') + UI().link('https://efdsearch.senate.gov/search/', 'Senat', 'chip') + '</p>', 'trader-pelosi');
     return h + '</ol>' + footer();
   };
+  /* Hebel-Check (nur hier, im Kurzfrist-Kontext): Knock-out hinter dem Stop, Schwankung des Hebelprodukts, Stop gegen Rauschen und Tagesspanne */
+  function levHtml(ctx, r, pl, P) {
+    var db = ctx.daily || [], atrA = db.length > 20 ? BC.ta.atr(db, 14) : null, atrD = atrA ? atrA[atrA.length - 1] : null;
+    var a5 = r.today && pl && pl.slot != null ? X().dayAtrOf(r.today, pl.slot) : null;
+    var lc = X().levCheck({ entry: pl.entry, stop: pl.stop, atrD: atrD, atr5: a5 ? a5.v : null });
+    if (!lc) return '';
+    var rows = [['Stop-Abstand', nf(lc.stopPct, 2) + ' %', lc.noise != null ? nf(lc.noise, 1) + '× Fünf-Minuten-Spanne' : ''],
+      ['Knock-out hinter dem Stop', lc.ko > 0 ? P(lc.ko) : '–', 'Puffer ein Fünftel der Tagesspanne'],
+      ['Möglicher Hebel', lc.lev ? '≈ ' + nf(lc.lev, 1) : '–', lc.swing != null ? 'Produkt schwankt ≈ ' + nf(lc.swing, 0) + ' % am Tag' : '']];
+    return '<details class="pro-set pro-lev"><summary>Hebel-Check (Kurzfrist)' + (lc.warns.length ? ' · ' + lc.warns.length + ' Hinweis' + (lc.warns.length > 1 ? 'e' : '') : '') + '</summary>' + BC.pro.plan(rows) +
+      lc.warns.map(function (w) { return '<p class="ta-warn">' + BC.ui.icon('alert') + '<span>' + e(w) + '</span></p>'; }).join('') +
+      '<p class="fact-s">Nur eine Rechnung für Hebelprodukte mit Knock-out – das Papierdepot handelt die Aktie selbst, ohne Hebel. Kurslücken können über Stop und Schwelle springen.</p></details>';
+  }
   function footer() {
     return '<p class="ta-note">Ablauf nach day-trader-skill (' + UI().link(SKILL, 'github.com/Jakeschincariol/day-trader-skill', '') + ', MIT): gleiche Regeln, gleiche Rundung, gleiche Zufallszahlen in der Zeitmaschine. Papierhandel als Standard, Risiko-Prüfung vor jedem Ticket, Freigabe nur durch dich. Die Zeitmaschine ist ein Realitätscheck aus der Vergangenheit, keine Prognose. Stops ohne Gewähr bei Kurslücken.</p>';
   }
