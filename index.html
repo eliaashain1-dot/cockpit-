@@ -1444,6 +1444,14 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
 .ct-box.is-busy{position:relative} .ct-box.is-busy svg{opacity:.4;transition:opacity .2s}
 .ct-box.is-busy::after{content:attr(data-busy);position:absolute;top:10px;left:50%;transform:translateX(-50%);background:var(--card,#1b2333);color:var(--text);padding:5px 12px;border-radius:14px;font-size:.8rem;box-shadow:0 2px 8px rgba(0,0,0,.25);white-space:nowrap}
 
+.ct-varbar[id]{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0 2px} .ct-varbar[hidden]{display:none} .ct-varl{font-size:.78rem;color:var(--dim);margin-right:2px}
+
+/* Fibonacci des gewählten Szenarios im Chart */
+.ct-z.ct-fz{opacity:.12} .ct-z.ct-fz.is-bull{fill:var(--up)} .ct-z.ct-fz.is-bear{fill:var(--down)}
+.ct-h.ct-fx{stroke:#a78bfa;stroke-width:1;stroke-dasharray:4 3} .ct-tag.ct-fx{color:#a78bfa} .ct-h.ct-fx.is-range{stroke:var(--muted);opacity:.7}
+.ct-h.ct-finv{stroke:var(--down);stroke-width:1;stroke-dasharray:2 3} .ct-tag.ct-finv{color:var(--down)}
+.ct-fsw{fill:#a78bfa;font-size:10px}
+
 </style>
 </head>
 <body>
@@ -9054,10 +9062,18 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     w.facts = waveFacts(b, a);
     var f = w.facts.filter(function (x) { return x.cur; })[0] || w.facts[w.facts.length - 1];
     if (f) w.txt += ' · ' + f.txt;
-    /* Kurs schon hinter der Ungültig-Marke: Zählung verworfen, keine Ziele, kein Pfad */
-    w.broken = !!(w.inval && (w.inval.side > 0 ? a.p > w.inval.v : a.p < w.inval.v));
+    /* Ausmachen: Hat ein Schlusskurs seit dem letzten Wendepunkt der Zählung die Ungültig-Marke verletzt (auch wenn der Kurs
+       inzwischen zurück ist), ist die Zählung verworfen – keine Ziele, kein Pfad, sie wirkt nicht mehr als aktiv */
+    w.broken = X.waveBroken(w, a);
     return w;
   }
+  X.waveBroken = function (w, a) {
+    if (!w || !w.inval || !ok(w.inval.v)) return false;
+    var side = w.inval.side, v = w.inval.v, last = w.pts && w.pts.length ? w.pts[w.pts.length - 1].i : a.n - 1, b = a.bars;
+    if (side > 0 ? a.p > v : a.p < v) return true;
+    for (var i = Math.max(0, last + 1); i < a.n; i++) if (b[i] && (side > 0 ? b[i].c > v : b[i].c < v)) return true;
+    return false;
+  };
   /* Wellen-Wertung 1–100 für die Kaufwertung: Richtung der nächsten Welle und des Impulses, Lage (früh in Welle 3, spät in Welle 5,
      Ende einer Korrektur in Welle C) – gewichtet mit der Güte der Zählung und abgeschwächt, wenn Struktur oder Alternative widersprechen */
   X.waveScore = function (a, d) {
@@ -15431,7 +15447,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       UI.chips(CT_RANGES, ct.range, 'ct-range', 'Zeitraum', 'is-scroll') + '</header>' + '<div class="ct-kbar">' + ctKHtml() + '</div>' + '<div class="ct-modebar">' + ctModeHtml() + '</div>' +
       '<div class="ct-quick" id="ctQuick"></div>' +
       '<p class="ch-read" id="ctRead" aria-live="polite"></p><div class="ch-box ct-box" id="ctChart"><div class="ch-wait">' + UI.loading('Chart-Technik wird gezeichnet …') + '</div></div>' +
-      '<div class="ct-scenbar" id="ctScenBar" role="group" aria-label="Szenario im Chart"></div>' +
+      '<div class="ct-scenbar" id="ctScenBar" role="group" aria-label="Szenario im Chart"></div><div class="ct-varbar" id="ctVarBar" role="group" aria-label="Weg zum Ziel" hidden></div>' +
       '<div class="ct-zoom" id="ctZoom"></div>' + ctCtlHtml() +
       '<div class="ct-legend" id="ctLegend"></div>' +
       '<details class="ct-fold panel-src"><summary><span>So liest du den Chart</span></summary><div class="ct-fold-b">Alles automatisch eingezeichnet. Kurse am rechten Rand gehören zu den Linien gleicher Farbe; die schraffierte Fläche rechts zeigt mögliche Pfade – sie stoßen an Zwischenmarken an, bevor sie weiterlaufen –, keine Prognose. Zoomen: zwei Finger auseinander oder seitlich, oder die Knöpfe unter dem Chart.</div></details></section>' +
@@ -15452,7 +15468,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var ct = BC.state.ct, tf = ct.tf || 'd', k = ct.k || 'd', cfg = ctCfg(), m = cfg.mode, custom = m === 'custom';
     var pat = custom ? ct.layers.indexOf('pat') >= 0 : m === 'pat', showTf = (custom || m === 'fib') && k !== 'w' && k !== 'm', showLvl = custom || ['fib', 'struct', 'wave', 'scen'].indexOf(m) >= 0;
     /* Szenario im Fokus: Ebenen, Muster und Fibonacci-Quelle ruhen – keine Schalter, die gerade nichts bewirken */
-    if (ct.scen) return '<div class="panel-controls is-below ct-ctl ct-ctlbox"><p class="fact-s ct-scen-ctl">Szenario im Fokus: Ebenen, Muster und Fibonacci ruhen. <button type="button" class="text-btn" data-act="ct-scen" data-v="' + e(ct.scen) + '">Alle Ebenen zeigen</button></p>' +
+    if (ct.scen) return '<div class="panel-controls is-below ct-ctl ct-ctlbox"><p class="fact-s ct-scen-ctl">Szenario im Fokus: Ebenen und Muster ruhen, eingezeichnet ist die Fibonacci dieses Szenarios. <button type="button" class="text-btn" data-act="ct-scen" data-v="' + e(ct.scen) + '">Alle Ebenen zeigen</button></p>' +
       '<p class="ct-tf-note"' + (ctv.full ? '' : ' id="ctTfNote"') + '>' + e(ctNote()) + '</p></div>';
     var segs = (custom ? ctSeg(CT_VIEWS, ct.view, 'ct-view', 'Detail') : '') + (showTf ? ctSeg(CT_TF, tf, 'ct-tf', 'Fibonacci aus Tages-, Wochen- oder Monatskerzen') : '') +
       (showLvl ? ctSeg(CT_LVL, ct.lvl || 'prim', 'ct-lvl', 'Swing-Ebene für Fibonacci, Wellen und Struktur') : '');
@@ -15470,6 +15486,8 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       var lx = isIntra(k) && ltf.id === cid() ? ltf[k] : ((k === 'w' || k === 'm') && htf.id === cid() ? htf[k] : null);
       parts.push(CT_KN[k] + (lx && lx.agg ? ' (' + lx.agg + ' zusammengefasst – die Quelle lieferte sie gerade nicht direkt)' : (k === 'm15' ? ' der letzten Wochen' : (k === 'h1' ? ' der letzten drei Monate' : (k === 'h4' ? ' des letzten Jahres' : (k === 'w' ? ' der letzten fünf Jahre' : ' seit Beginn'))))) + ' – Struktur, Zonen, Fibonacci, Wellen, Muster und Szenarien sind für dieses Zeitfenster gerechnet.');
     }
+    var lxN = isIntra(k) && ltf.id === cid() ? ltf[k] : null;
+    if (lxN && lxN.note) parts.push(lxN.note);
     if (k !== 'w' && k !== 'm') { var hn = htfNote(); if (hn) parts.push(hn); }
     if ((k === 'm15' || k === 'h1') && (ct.tf || 'd') === 'd' && ctCfg().klar && st === 'ok') parts.push('Fibonacci in „Klar“ aus den eigenen Kerzen; „Alles“ zeigt die Tages-Fibonacci.');
     if ((ct.lvl || 'prim') === 'sub') parts.push('Sub-Swing: Fibonacci, Wellen und Struktur aus den kleinen Schwüngen.');
@@ -15503,7 +15521,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var cs = csym(), my = run;
     if (!cs) return;
     if (htf.id !== cs.id) htf = { id: cs.id, w: null, m: null, busy: {}, tries: {} };
-    var hx = htf[tf];
+    var hx = htf[tf], prevH = hx && hx.a ? hx : null;
     if ((hx && !hx.err && !(force && hx.soft)) || (hx && hx.err && !force && Date.now() - (hx.at || 0) < 20000) || htf.busy[tf]) return;
     htf.busy[tf] = true;
     withTimeout(A.candles(cs, tf === 'w' ? '5y' : 'max'), 15000).then(function (d) {
@@ -15516,7 +15534,8 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       if (htf.id !== cs.id) return;
       /* Ersatz: Wochen- oder Monatskerzen aus den schon geladenen Tageskerzen, damit die Ansicht nicht leer bleibt */
       var fb = tech.d && tech.id === cs.id ? aggPeriod(tech.d.bars, tf) : null, an0 = fb && fb.length >= 30 ? BC.ta.analyze(fb, { now: Date.now() }) : null;
-      htf[tf] = an0 ? { a: an0, bars: fb, agg: 'aus Tageskerzen', at: Date.now(), soft: err && err.code === 'limit' ? 'limit' : 'weg' } : { err: err && err.code === 'limit' ? 'limit' : 'weg', at: Date.now() };
+      var ek0 = err && err.code === 'limit' ? 'limit' : 'weg';
+      htf[tf] = prevH && !prevH.agg ? Object.assign({}, prevH, { soft: ek0, at: Date.now() }) : (an0 ? { a: an0, bars: fb, agg: 'aus Tageskerzen', at: Date.now(), soft: ek0 } : (prevH ? Object.assign({}, prevH, { soft: ek0, at: Date.now() }) : { err: ek0, at: Date.now() }));
     }).then(function () {
       htf.busy[tf] = false;
       if (!alive(my) || htf.id !== cs.id) return;
@@ -15574,7 +15593,12 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       if (lq) BC.chart.liveMerge(x, lq, { utc: isCrypto(), reg: !isCrypto() });
       var an = BC.ta.analyze(x.bars, { now: Date.now(), intraday: true });
       ltf[k] = an ? { a: an, bars: x.bars, at: Date.now(), agg: d.agg || '' } : Object.assign(ltfWhy({ code: 'wenig' }, k), { at: Date.now() });
-    }, function (err) { if (ltf.id === cs.id) ltf[k] = Object.assign(ltfWhy(err, k), { at: Date.now() }); }).then(function () {
+    }, function (err) {
+      if (ltf.id !== cs.id) return;
+      /* Liegen schon Kerzen vor (etwa beim Auffrischen), bleibt der vorhandene Stand – mit Hinweis statt leerem Chart */
+      var prev = ltf[k];
+      ltf[k] = prev && prev.a ? Object.assign({}, prev, { stale: false, at: Date.now(), note: 'Stand von ' + U.clock(prev.at || Date.now()) + ' Uhr – neuer Abruf gerade nicht möglich, es wird später erneut versucht.' }) : Object.assign(ltfWhy(err, k), { at: Date.now() });
+    }).then(function () {
       ltf.busy[k] = false;
       if (!alive(my) || ltf.id !== cs.id) return;
       /* Ausgelastet: in 25 Sekunden neu; nicht erreichbar: höchstens zweimal je Minute neu versuchen */
@@ -15952,6 +15976,16 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
       return '<div class="t-' + (c[2] || 'none') + '"><span>' + e(c[0]) + '</span><b>' + c[1] + '</b></div>';
     }).join('') + '</div>';
   }
+  /* Weg zum Ziel als Schalter am Chart (nur mit gewähltem Bullisch oder Bärisch und mehr als einem Weg) */
+  function ctVarBarHtml(d, scen) {
+    var x = d && d.sc && (scen === 'bull' || scen === 'bear') ? d.sc.list.filter(function (q) { return q.k === scen; })[0] : null, vars = x && x.vars || [];
+    if (vars.length < 2) return '';
+    var vk = ctVar[x.k] || x.varMain || 'direct', on0 = vars.filter(function (q) { return q.k === vk; })[0] || vars[0];
+    return '<span class="ct-varl">Weg zum Ziel</span>' + vars.map(function (q) {
+      var on = q === on0, nm = q.k === 'pat' ? 'Muster' : q.n;
+      return '<button type="button" class="chip' + (on ? ' is-on' : '') + '" data-act="ct-var" data-k="' + x.k + '" data-v="' + q.k + '" aria-pressed="' + on + '" title="' + e(q.txt) + '">' + e(nm) + (q.k === x.varMain ? ' ·' + NB + 'Vorschlag' : '') + '</button>';
+    }).join('');
+  }
   /* Szenario-Schalter unter dem Chart: Alle, Bullisch, Seitwärts, Bärisch – mit der Gewichtung dieses Zeitfensters */
   function ctScenBarHtml(d) {
     var on = BC.state.ct.scen || '', sc = d && d.sc;
@@ -15977,10 +16011,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     (x.tgts || []).slice(0, 3).forEach(function (t, i) { rows.push([i ? '' : (x.k === 'range' ? 'Ränder' : 'Zielzone'), P(t.v) + ' <small>' + e(t.txt || '') + ' · ' + F().pct((t.v / p - 1) * 100) + '</small>']); });
     if (x.inval) rows.push(['Ungültig', e(x.inval.txt)]);
     var why = x.why || { pro: [], con: [] }, stt = x.status || { s: 'waiting' };
-    var varBar = vars.length > 1 ? '<div class="chips ct-varbar" role="group" aria-label="Weg zum Ziel">' + vars.map(function (q) {
-      return '<button type="button" class="chip' + (q === vr ? ' is-on' : '') + '" data-act="ct-var" data-k="' + x.k + '" data-v="' + q.k + '" aria-pressed="' + (q === vr) + '">' + e(q.k === 'pat' ? 'Muster' : q.n) + '</button>';
-    }).join('') + '</div>' : '';
-    return '<div class="ct-selbox is-' + cls + '"><p class="ct-selh"><span class="ta-l">Szenario' + (x.k === sc.main ? ' · Haupt' : '') + '</span><b>' + e(x.n) + ' · ' + x.w + NB + '%</b></p>' + varBar +
+    return '<div class="ct-selbox is-' + cls + '"><p class="ct-selh"><span class="ta-l">Szenario' + (x.k === sc.main ? ' · Haupt' : '') + '</span><b>' + e(x.n) + ' · ' + x.w + NB + '%</b></p>' +
       (x.k !== 'range' ? '<p class="ct-st is-' + stt.s + (stt.live ? ' is-live' : '') + '"><b>' + e(BC.struct.TRIG_ST[stt.s] || stt.s) + '</b> <small>(' + stt.s + ')</small> · ' + e(stt.txt || '') + '</p>' : '') +
       UI.stats(rows, 'is-wide') + '<p class="fact-s"><b>Einordnung:</b> ' + e(x.txt) + '</p>' +
       /* Alles Weitere einklappbar und ohne Wiederholung: Begründung, Ausstieg, Realitätscheck, Vor-dem-Trade (ausführlich unter Technik) */
@@ -16146,10 +16177,33 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     for (i = iH; i < n; i++) if (b[i].l < dn.lo) { dn.lo = b[i].l; dn.loI = i; }
     return { up: up, dn: dn };
   }
+  function fibScenOverlay(a, d, k) {
+    var lg = fibLegs(a), b = a.bars, n = a.n, ov = [], sk = 'scen:' + k, sc = d.sc;
+    if (k === 'bull') {
+      var u = lg.up, H = u.hi - u.lo;
+      if (!(H > 0)) return ov;
+      ov.push({ k: 'z', v1: u.hi - 0.618 * H, v2: u.hi - 0.382 * H, i1: u.loI, cls: 'ct-fz is-bull', lab: 'Fib 38–62 % (Rücksetzer)', prio: 4, right: true, fit: true, sel: sk });
+      [[1.272, '127,2 %'], [1.618, '161,8 %']].forEach(function (x, j) { ov.push({ k: 'h', v: u.lo + x[0] * H, i1: u.hiI, tail: 0.1, cls: 'ct-fx is-bull', lab: 'Fib ' + x[1], prio: 5 - j, right: true, tag: true, fit: j === 0, sel: sk }); });
+      ov.push({ k: 'h', v: u.lo, i1: u.loI, tail: 0.1, cls: 'ct-finv', lab: 'Fib ungültig darunter', prio: 4, right: true, tag: true, sel: sk });
+      ov.push({ k: 't', i: u.loI, v: u.lo, lab: 'von ' + dshort(b[u.loI].t), pos: 'below', cls: 'ct-fsw' }, { k: 't', i: u.hiI, v: u.hi, lab: 'bis ' + dshort(b[u.hiI].t), pos: 'above', cls: 'ct-fsw' });
+    } else if (k === 'bear') {
+      var w = lg.dn, D0 = w.hi - w.lo;
+      if (!(D0 > 0)) return ov;
+      ov.push({ k: 'z', v1: w.lo + 0.382 * D0, v2: w.lo + 0.618 * D0, i1: w.hiI, cls: 'ct-fz is-bear', lab: 'Fib 38–62 % (Gegenbewegung)', prio: 4, right: true, fit: true, sel: sk });
+      [[1.272, '127,2 %'], [1.618, '161,8 %']].forEach(function (x, j) { var v = w.hi - x[0] * D0; if (!(v > w.lo * 0.05)) v = w.hi * Math.pow(w.lo / w.hi, x[0]); ov.push({ k: 'h', v: v, i1: w.loI, tail: 0.1, cls: 'ct-fx is-bear', lab: 'Fib ' + x[1], prio: 5 - j, right: true, tag: true, fit: j === 0, sel: sk }); });
+      ov.push({ k: 'h', v: w.hi, i1: w.hiI, tail: 0.1, cls: 'ct-finv', lab: 'Fib ungültig darüber', prio: 4, right: true, tag: true, sel: sk });
+      ov.push({ k: 't', i: w.hiI, v: w.hi, lab: 'von ' + dshort(b[w.hiI].t), pos: 'above', cls: 'ct-fsw' }, { k: 't', i: w.loI, v: w.lo, lab: 'bis ' + dshort(b[w.loI].t), pos: 'below', cls: 'ct-fsw' });
+    } else {
+      var rg = sc && sc.list.filter(function (q) { return q.k === 'range'; })[0];
+      if (!rg || !(rg.hi > rg.lo)) return ov;
+      [[0.25, '25 %'], [0.5, 'Mitte 50 %'], [0.75, '75 %']].forEach(function (x) { ov.push({ k: 'h', v: rg.lo + x[0] * (rg.hi - rg.lo), i1: Math.max(0, n - 40), tail: 0.08, cls: 'ct-fx is-range', lab: 'Spanne ' + x[1], prio: 3, right: true, sel: sk }); });
+    }
+    return ov;
+  }
   function fibScenHtml(a, d, P) {
     var sc = d.sc, p = a.p;
     if (!sc) return '';
-    var k = ctFibSc || sc.main, lg = fibLegs(a), b = a.bars, rows = [], head = '', inv = '', R = [0.382, 0.5, 0.618], X = [1.272, 1.618];
+    var scen0 = BC.state.ct.scen, k = ctFibSc || (scen0 === 'bull' || scen0 === 'bear' || scen0 === 'range' ? scen0 : sc.main), lg = fibLegs(a), b = a.bars, rows = [], head = '', inv = '', R = [0.382, 0.5, 0.618], X = [1.272, 1.618];
     var dist = function (v) { return ' <small>' + F().pct((v / p - 1) * 100) + '</small>'; };
     if (k === 'bull') {
       var u = lg.up, H = u.hi - u.lo;
@@ -16173,7 +16227,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     }
     rows.push(['Ungültig', inv]);
     var nm = { bull: 'Bullisch', range: 'Seitwärts', bear: 'Bärisch' };
-    var chips = [{ v: '', n: 'App-Szenario: ' + nm[sc.main] }, { v: 'bull', n: 'Bullisch' }, { v: 'range', n: 'Seitwärts' }, { v: 'bear', n: 'Bärisch' }];
+    var chips = [{ v: '', n: (scen0 === 'bull' || scen0 === 'bear' || scen0 === 'range' ? 'Gewähltes Szenario: ' + nm[scen0] : 'App-Szenario: ' + nm[sc.main]) }, { v: 'bull', n: 'Bullisch' }, { v: 'range', n: 'Seitwärts' }, { v: 'bear', n: 'Bärisch' }];
     return '<div class="chips ct-varbar" role="group" aria-label="Fibonacci nach Szenario">' + chips.map(function (c) {
       var on = (ctFibSc || '') === c.v;
       return '<button type="button" class="chip' + (on ? ' is-on' : '') + '" data-act="ct-fibsc" data-v="' + c.v + '" aria-pressed="' + on + '">' + e(c.n) + '</button>';
@@ -16344,6 +16398,8 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     var ov = scen ? pro([], false, true) : BC.ctOverlay(a, cfg.main, 'alles', fmt, com).concat(BC.ctOverlay(a, cfg.sup, 'klar', fmt, com), pro(cfg.main, false, true), pro(cfg.sup, true, false));
     /* Wochen und Monate: Korrekturzone, Fortsetzungs-Marke und Gefährdungs-Marke des Langfrist-Bilds (nicht bei gewähltem Szenario) */
     if (!scen && (k === 'w' || k === 'm')) ov = ov.concat(ltOverlay(a, d));
+    /* Szenario gewählt: Fibonacci dieses Szenarios mit im Chart – Bezugsschwung (von–bis), Zone, Ziele, Ungültig */
+    if (scen === 'bull' || scen === 'bear' || scen === 'range') ov = ov.concat(fibScenOverlay(a, d, scen));
     var ind = !scen && cfg.all.indexOf('ma') >= 0 ? (klar ? ['sma50', 'sma200'] : ['sma20', 'sma50', 'sma200']) : [];
     tech.ctl = BC.chart.render(el, { bars: atEnd ? a.bars : a.bars.slice(0, w.end + 1), lead: w.start, range: range }, {
       type: 'candle', ind: ind, cur: cu, future: fut,
@@ -16353,6 +16409,9 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
     });
     var sb = byId(ctv.full ? 'ctScenBarFull' : 'ctScenBar');
     if (sb) sb.innerHTML = ctScenBarHtml(d);
+    /* Weg zum Ziel direkt unter dem Szenario-Schalter: Direkt, Muster, Umweg (Vorschlag der App vorgewählt) */
+    var vb = byId(ctv.full ? 'ctVarBarFull' : 'ctVarBar');
+    if (vb) { var vh = ctVarBarHtml(d, scen); vb.innerHTML = vh; vb.hidden = !vh; }
     /* Schnell-Übersicht nur ohne gewähltes Szenario – mit Szenario steht alles im Szenario-Block, nichts doppelt */
     var qk = byId('ctQuick');
     if (qk && !ctv.full) { qk.innerHTML = scen ? '' : ctQuickHtml(a, d, k, st.lvl || 'prim'); qk.hidden = !!scen; }
@@ -17544,7 +17603,7 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
         ctv.full = true;
         var ct = BC.state.ct;
         BC.app.openFullHtml(sym.t + ' · Chart-Technik', '<div class="ct-fullbar">' + UI.chips(CT_RANGES, ct.range, 'ct-range', 'Zeitraum', 'is-scroll') + '<div class="ct-kbar">' + ctKHtml() + '</div><div class="ct-modebar">' + ctModeHtml() + '</div></div>' +
-          '<p class="ch-read is-full" id="ctReadFull" aria-live="polite"></p><div class="ch-box ct-box is-full" id="ctFullChart"></div><div class="ct-scenbar" id="ctScenBarFull" role="group" aria-label="Szenario im Chart"></div><div class="ct-zoom" id="ctZoomFull"></div>' +
+          '<p class="ch-read is-full" id="ctReadFull" aria-live="polite"></p><div class="ch-box ct-box is-full" id="ctFullChart"></div><div class="ct-scenbar" id="ctScenBarFull" role="group" aria-label="Szenario im Chart"></div><div class="ct-varbar" id="ctVarBarFull" role="group" aria-label="Weg zum Ziel" hidden></div><div class="ct-zoom" id="ctZoomFull"></div>' +
           ctCtlHtml() + '<div class="ct-legend" id="ctLegendFull"></div>',
           function () { drawChartTech(); }, function () { ctv.full = false; ctSyncChips(); ctCtlRedraw(); drawChartTech(); });
       },
@@ -18970,8 +19029,9 @@ button.act-row{width:100%;border:0;border-top:1px solid var(--line);background:n
           '<p><strong>Realitätscheck</strong> im Szenario: wie oft in der eigenen Kursgeschichte zuerst das Ziel, zuerst der Stop oder bis zum Ende keins von beiden erreicht wurde – einmal aus der echten Geschichte, einmal als Replay aus zufällig neu zusammengesetzten Abschnitten mit festem Startwert (Seed 19, wiederholbar). Eine Simulation, keine Prognose und keine Garantie.</p>' +
           '<p><strong>Schnell-Übersicht</strong> über dem Chart: Lage, Hauptszenario mit Trigger, Welle bzw. Struktur und die entscheidende Marke mit Ungültig-Marke – auf einen Blick. Ist ein Szenario gewählt, tritt sie zurück: Dann steht alles im Szenario-Block, und Begründung, Ausstieg und Alarme, Realitätscheck sowie „Vor dem Trade“ sind dort einklappbar, damit nichts doppelt steht. Der aktive Daytrade mit Eröffnungsspanne und Zeitmaschine bleibt im Reiter Daytrading.</p>' +
           '<p><strong>Pfade an Marken</strong>: Die möglichen Wege rechts im Chart laufen nicht stumpf durch. Liegt vor dem Trigger oder vor dem Ziel eine Unterstützung, ein Widerstand, eine Konfluenz-Zone, ein Volumen-Knoten (POC/HVN) oder ein gleitender Durchschnitt, stößt der Pfad dort an, fällt zurück und läuft erst dann weiter – nach einem Ausbruch mit Rücktest der Marke. Im Szenario-Block steht unter „Weg zum Ziel“, welche Zwischenmarke zuerst getestet oder überwunden werden muss.</p>' +
-          '<p><strong>Wege zum Ziel</strong>: Im gewählten Szenario wählst du den Weg – <strong>Direkt</strong> (über die Zwischenmarken), <strong>Muster</strong> (Ausbruch aus dem erkannten Muster wie Keil, Flagge, Dreieck oder Doppelboden, mit Rücktest und Messziel; die Linien des Musters stehen dann im Chart, dazu woran es scheitert) oder <strong>Umweg</strong> (erst Gegenbewegung an die nächste Marke, kurzer Fehlbruch – Liquidity Grab – und zweiter Test wie bei Doppelboden oder Doppeltop, dann die eigentliche Richtung). Vorschlag der App: Muster, wenn eins trägt, sonst direkt.</p>' +
-          '<p><strong>Fibonacci nach Szenario</strong> (Chart-Technik, Details): zuerst das Hauptszenario der App, umschaltbar auf Bullisch, Seitwärts, Bärisch – mit Bezugsschwung von–bis, Rücksetzer- bzw. Gegenbewegungs-Zone, Zielen aus der Ausdehnung und der Ungültig-Marke.</p>' +
+          '<p><strong>Wege zum Ziel</strong>: Direkt unter dem Szenario-Schalter am Chart wählst du bei Bullisch oder Bärisch den Weg – <strong>Direkt</strong> (über die Zwischenmarken), <strong>Muster</strong> (Ausbruch aus dem erkannten Muster wie Keil, Flagge, Dreieck oder Doppelboden, mit Rücktest und Messziel; die Linien des Musters stehen dann im Chart, dazu woran es scheitert) oder <strong>Umweg</strong> (erst Gegenbewegung an die nächste Marke, kurzer Fehlbruch – Liquidity Grab – und zweiter Test wie bei Doppelboden oder Doppeltop, dann die eigentliche Richtung). Vorschlag der App: Muster, wenn eins trägt, sonst direkt.</p>' +
+          '<p><strong>Elliott ausmachen</strong>: Schließt der Kurs seit dem letzten Wendepunkt einer Zählung jenseits ihrer Ungültig-Marke – auch nur kurz –, ist die Zählung verworfen und wirkt nicht mehr (keine Ziele, kein Pfad); sie steht nur noch als „Verworfen“ darunter. Zählungen gegen den übergeordneten Trend tauschen mit einer passenden Alternative, das steht dabei.</p>' +
+          '<p><strong>Fibonacci nach Szenario</strong> – im Chart, sobald Bullisch, Seitwärts oder Bärisch gewählt ist (Zone 38–62 %, Ziele 127,2 und 161,8 %, Ungültig-Marke, Bezugsschwung „von … bis …“ an den Wendepunkten; bei Seitwärts die Viertel der Spanne), dazu als Tabelle unter Details: zuerst das Hauptszenario der App, umschaltbar auf Bullisch, Seitwärts, Bärisch – mit Bezugsschwung von–bis, Rücksetzer- bzw. Gegenbewegungs-Zone, Zielen aus der Ausdehnung und der Ungültig-Marke.</p>' +
           '<p><strong>Stufen der Wertung</strong> (Technik, „So entsteht die Wertung“): 1 Struktur und Muster, 2 Trend-Status (intakt, in Korrektur, seitwärts, Trendbruch), 3 Gesamt – die bekannte Kaufwertung mit allen Teilwerten. Im Reiter Daytrading steht eine eigene <strong>Kurzfrist-Wertung</strong> aus Trigger, Chance zu Risiko, Zeitmaschine, Stundentrend und Volumen.</p>' +
           '<p><strong>Leitplanken der Wertungen</strong>: Kaufwertung (Trend und Qualität), Umkehr-Chance (nur echte Bodensignale) und Setup-Güte (Marken, Trigger, Chance zu Risiko) sind getrennt. Chance zu Risiko unter 1 : 1 deckelt Einstiegs- und Setup-Wert. Stark überverkauft im Abwärtstrend (fallendes Messer) bringt keinen Pluspunkt. Ohne Strukturbeleg (Signal, höheres Tief, Linienbruch, Doppelboden, Divergenz, gehaltenes Tief) bleibt die Umkehr-Chance klein; ein starker Abwärtstrend (ADX ab 25) bremst sie zusätzlich. Was gedeckelt wurde, steht beim Check. Unter der Kaufwertung steht, ob Woche oder Stunde gegen die Tageskerzen laufen. Ein Bullisch-Muster gegen eine gebrochene Struktur oder nach einem jüngeren Topmuster bleibt sichtbar, zählt aber weniger und dient nicht als Trigger.</p>' +
           '<p><strong>Langfrist-Bild</strong> in Wochen- und Monatskerzen: übergeordneter Trend und Struktur, die wichtigste große Formation (Kanal, Keil, Dreieck, Boden, Top …) mit Status – in Ausbildung, Bruch (bestätigt) oder ungültig – und ihre Einordnung. Steckt ein Aufwärtstrend im Rücksetzer: Korrekturtiefe vom Hoch und in Prozent des letzten Anstiegs, Korrekturzone (38,2–61,8 % des Anstiegs), die Marke, ab der der Trend weiterläuft, und die, unter der er gefährdet ist – auch im Chart eingezeichnet. Fehlen die Wochenkerzen, fasst die App sie aus den Tageskerzen zusammen und sagt das dazu.</p>' +
