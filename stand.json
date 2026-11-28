@@ -1,0 +1,31 @@
+{
+ "t": 1795878134210,
+ "ff": "ok · 77 Termine",
+ "fred": {
+  "CPIAUCSL": "behalten (HTTP 403)",
+  "CPILFESL": "behalten (FRED nicht erreichbar)",
+  "T10YIE": "behalten (FRED nicht erreichbar)",
+  "FEDFUNDS": "behalten (FRED nicht erreichbar)",
+  "UNRATE": "behalten (FRED nicht erreichbar)",
+  "PAYEMS": "behalten (FRED nicht erreichbar)",
+  "ICSA": "behalten (FRED nicht erreichbar)",
+  "DGS10": "behalten (FRED nicht erreichbar)",
+  "DGS2": "behalten (FRED nicht erreichbar)",
+  "T10Y2Y": "behalten (FRED nicht erreichbar)",
+  "M2SL": "behalten (FRED nicht erreichbar)",
+  "WALCL": "behalten (FRED nicht erreichbar)",
+  "BAMLH0A0HYM2": "behalten (FRED nicht erreichbar)",
+  "ECBDFR": "behalten (FRED nicht erreichbar)",
+  "DTWEXBGS": "behalten (FRED nicht erreichbar)",
+  "VIXCLS": "behalten (FRED nicht erreichbar)"
+ },
+ "wege": {
+  "ff": "direkt",
+  "cnn": "direkt"
+ },
+ "cnn": "ok · 25 (extreme fear)",
+ "dauer": "42 s",
+ "wf": 3,
+ "scan": "unverändert (aktuell genug)",
+ "scanT": 1795813936168
+}
